@@ -1,0 +1,36 @@
+# Local data and releases
+/data/
+/dist/
+/qdrant/
+/qdrant_smoke/
+/vendor/
+/research/
+
+# Virtual environments
+/.venv*/
+
+# Local secrets and configs
+config/secrets/
+*.secret
+.env
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs and databases
+*.log
+*.sqlite
+*.sqlite-*
+*.db
+
+# Build outputs
+*.zip
+.build/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

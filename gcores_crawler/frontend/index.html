@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>机核电台记忆搜索</title>
+  <link rel="stylesheet" href="./assets/styles.css" />
+</head>
+<body>
+  <div class="page-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <div class="brand-row">
+          <a class="brand" href="/">Gsearch</a>
+          <span class="mode-pill hidden" id="mode-pill">本地版</span>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <div class="library-note" id="library-note">本库更新于 -</div>
+        <button type="button" class="text-button" id="utility-button">关于本库</button>
+      </div>
+    </header>
+
+    <section class="offline-notice hidden" id="offline-notice">
+      <div class="offline-copy">
+        <strong>当前查询服务不可达</strong>
+        <p id="offline-message">静态页面已经打开，但现在无法连接搜索后端。</p>
+      </div>
+      <a id="offline-download-link" class="text-link hidden" href="#" target="_blank" rel="noopener noreferrer">下载本地版</a>
+    </section>
+
+    <main class="page-main">
+      <section class="hero">
+        <p class="hero-kicker" id="hero-kicker">Server Mode</p>
+        <h1 class="hero-title" id="page-title">机核电台记忆检索</h1>
+
+        <div class="search-toolbar">
+          <div class="scope-switch" id="scope-switch" role="tablist" aria-label="搜索范围">
+            <button type="button" class="scope-chip is-active" data-scope="content">内容</button>
+            <button type="button" class="scope-chip" data-scope="title">标题</button>
+            <button type="button" class="scope-chip" data-scope="timeline">时间轴</button>
+          </div>
+        </div>
+
+        <form class="search-form" id="search-form">
+          <label class="search-box" for="query">
+            <input
+              id="query"
+              type="search"
+              autocomplete="off"
+              placeholder="比如：好像聊过涨价和行业压力的那期"
+            />
+            <button type="button" class="filter-trigger" id="filter-button" aria-label="筛选条件" title="筛选条件">
+              <span class="filter-bars" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </span>
+            </button>
+            <div class="filter-dropdown hidden" id="filter-dropdown">
+              <div class="filter-dropdown-head">
+                <div>
+                  <p class="filter-dropdown-kicker">筛选</p>
+                  <strong>筛选条件</strong>
+                </div>
+                <button type="button" class="mini-button hidden" id="clear-filters">清空</button>
+              </div>
+              <div class="filter-tabs" id="filter-tabs" role="tablist" aria-label="筛选分组">
+                <button
+                  type="button"
+                  class="filter-tab is-active"
+                  id="filter-tab-categories"
+                  data-filter-tab="categories"
+                  role="tab"
+                  aria-selected="true"
+                  aria-controls="filter-panel-categories"
+                >节目类型</button>
+                <button
+                  type="button"
+                  class="filter-tab"
+                  id="filter-tab-participants"
+                  data-filter-tab="participants"
+                  role="tab"
+                  aria-selected="false"
+                  aria-controls="filter-panel-participants"
+                >参与者</button>
+              </div>
+              <div class="filter-panels">
+                <section
+                  class="filter-section is-active"
+                  id="filter-panel-categories"
+                  data-filter-panel="categories"
+                  role="tabpanel"
+                  aria-labelledby="filter-tab-categories"
+                >
+                  <div class="filter-section-head">
+                    <strong>节目类型</strong>
+                  </div>
+                  <div class="participant-list program-type-list" id="program-type-list"></div>
+                </section>
+                <section
+                  class="filter-section"
+                  id="filter-panel-participants"
+                  data-filter-panel="participants"
+                  role="tabpanel"
+                  aria-labelledby="filter-tab-participants"
+                >
+                  <div class="filter-section-head">
+                    <strong>参与者</strong>
+                  </div>
+                  <label class="participant-search-field" for="participant-search">
+                    <input id="participant-search" type="search" autocomplete="off" placeholder="搜索参与者" />
+                  </label>
+                  <div class="participant-list" id="participant-list"></div>
+                </section>
+              </div>
+              <div class="filter-summary">
+                <p id="filter-summary-text">暂未筛选节目类型和参与者。</p>
+              </div>
+            </div>
+          </label>
+          <button type="submit" class="search-button" id="search-submit">搜索</button>
+        </form>
+
+        <div class="active-filters hidden" id="active-filters"></div>
+      </section>
+
+      <section class="results-section">
+        <div class="results-head">
+          <h2 class="results-title">搜索结果</h2>
+          <div class="results-status" id="status-line">从一段记忆开始搜索。</div>
+        </div>
+        <div class="empty-state" id="empty-state"></div>
+        <div class="results-list" id="results"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="sheet hidden" id="sheet-root" aria-hidden="true">
+    <button type="button" class="sheet-backdrop" id="sheet-backdrop" aria-label="关闭面板"></button>
+    <section class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <div class="sheet-head">
+        <div>
+          <p class="sheet-kicker" id="sheet-kicker">筛选</p>
+          <h2 id="sheet-title">参与者筛选</h2>
+        </div>
+        <button type="button" class="sheet-close" id="sheet-close" aria-label="关闭">关闭</button>
+      </div>
+
+      <div class="sheet-content">
+        <section class="sheet-block hidden" id="about-panel">
+          <dl class="meta-list" id="about-meta-list"></dl>
+        </section>
+
+        <section class="sheet-block hidden" id="settings-panel">
+          <div class="viewer-status-card">
+            <strong>本地 Key 状态</strong>
+            <p id="viewer-key-status">正在读取本地状态...</p>
+          </div>
+          <form id="viewer-key-form" class="viewer-key-form">
+            <label class="field-label" for="viewer-api-key">智谱 API Key</label>
+            <input id="viewer-api-key" type="password" autocomplete="off" placeholder="输入你自己的智谱 API Key" />
+            <label class="check-row">
+              <input id="viewer-session-only" type="checkbox" />
+              <span>仅本次会话使用</span>
+            </label>
+            <div class="sheet-actions">
+              <button type="submit" class="search-button">保存 Key</button>
+              <button type="button" class="mini-button" id="viewer-clear-key">清除 Key</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </section>
+  </div>
+
+  <div class="backend-toast" id="backend-toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <script type="module" src="./assets/app.js"></script>
+</body>
+</html>

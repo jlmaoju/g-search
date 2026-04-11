@@ -1,0 +1,13 @@
+# 核心运行时
+fastapi
+uvicorn
+qdrant-client
+numpy
+requests
+
+# 音频 / ASR 相关
+librosa
+soundfile
+torch
+transformers
+funasr
