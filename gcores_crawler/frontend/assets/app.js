@@ -9,6 +9,7 @@ const ABOUT_LABELS = {
 };
 
 const BACKEND_MAINTENANCE_MESSAGE = "后端正在维护，请稍后重试（或联系作者PHSJ2019）";
+const DEGRADED_SEARCH_DEFAULT_MESSAGE = "语义检索服务暂时不可用，当前显示的是关键词降级结果，相关性和排序质量会下降。";
 
 const state = {
   runtimeConfig: {
@@ -545,7 +546,7 @@ function markBackendUnavailable(message = BACKEND_MAINTENANCE_MESSAGE) {
 }
 
 function shouldEnterMaintenanceMode(error, statusCode) {
-  if ([500, 502, 503, 504].includes(statusCode)) return true;
+  if ([502, 503, 504].includes(statusCode)) return true;
   if (!(error instanceof Error)) return false;
   return /failed to fetch|networkerror|load failed/i.test(error.message);
 }
@@ -603,6 +604,9 @@ function emptyResultMessage() {
   if (!state.lastPayload) {
     return "从一段记忆开始搜索。";
   }
+  if (isDegradedPayload(state.lastPayload)) {
+    return `${degradedSearchMessage(state.lastPayload)}没有找到关键词降级结果。`;
+  }
   return "没有找到明显匹配，换一个更具体的线索再试一次。";
 }
 
@@ -658,11 +662,43 @@ function renderResultCard(result) {
 
 function renderResults() {
   const results = state.results || [];
-  els.results.innerHTML = results.map(renderResultCard).join("");
+  els.results.innerHTML = `${renderDegradedNotice(state.lastPayload)}${results.map(renderResultCard).join("")}`;
   els.emptyState.classList.toggle("hidden", results.length > 0);
   if (!results.length) {
     els.statusLine.textContent = emptyResultMessage();
   }
+}
+
+function isDegradedPayload(payload) {
+  return Boolean(payload && (payload.degraded || payload.recall_stats?.lexical_fallback));
+}
+
+function degradedSearchMessage(payload) {
+  if (payload?.degraded_message) return String(payload.degraded_message);
+  const semanticError = String(payload?.semantic_error || "");
+  if (/1113|余额不足|资源包/.test(semanticError)) {
+    return "语义检索额度不足，当前显示的是关键词降级结果，相关性和排序质量会明显下降。";
+  }
+  if (/timed out|timeout/i.test(semanticError)) {
+    return "语义检索服务响应超时，当前显示的是关键词降级结果，相关性和排序质量会下降。";
+  }
+  return DEGRADED_SEARCH_DEFAULT_MESSAGE;
+}
+
+function renderDegradedNotice(payload) {
+  if (!isDegradedPayload(payload)) return "";
+  const message = degradedSearchMessage(payload);
+  const detail = payload?.degraded_detail || "本次没有使用向量语义召回，只使用本地关键词索引进行降级检索。";
+  return `
+    <section class="degraded-notice" role="alert" aria-live="assertive">
+      <div class="degraded-notice-badge">降级检索</div>
+      <div>
+        <strong>当前结果已降级，不是完整语义检索结果。</strong>
+        <p>${escapeHtml(message)}</p>
+        <p class="degraded-notice-detail">${escapeHtml(detail)}</p>
+      </div>
+    </section>
+  `;
 }
 
 function updateStatusFromPayload(payload) {
@@ -671,10 +707,13 @@ function updateStatusFromPayload(payload) {
     els.statusLine.textContent = emptyResultMessage();
     return;
   }
-  const baseText = `这里是相关度前 ${count} 的结果`;
+  const baseText = isDegradedPayload(payload)
+    ? `降级检索：这里是前 ${count} 条关键词结果，未使用完整语义召回`
+    : `这里是相关度前 ${count} 的结果`;
   const summary = selectedFilterSummary();
   const filters = summary ? ` · 已筛选 ${summary}` : "";
-  els.statusLine.textContent = `${baseText}${filters}`;
+  const degradedHint = isDegradedPayload(payload) ? `。${degradedSearchMessage(payload)}` : "";
+  els.statusLine.textContent = `${baseText}${filters}${degradedHint}`;
 }
 
 async function loadRuntimeConfig() {

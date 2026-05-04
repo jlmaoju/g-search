@@ -1,8 +1,19 @@
-# 发布清单
+# 发布检查清单
 
-1. 确认导出目录里没有 `data/`、`dist/`、备份库或私有日志。
-2. 确认许可证是否符合你的开源意图。
-3. 再读一遍 `README.md`，删掉你不想对外承诺支持的流程。
-4. 决定是否保留这些 Windows PowerShell 启动脚本。
-5. 在导出目录里做一次最终密钥扫描。
-6. 初始化 git，提交首个版本，再推到 GitHub。
+发布源码前：
+
+- 确认仓库里没有 `.env`。
+- 确认仓库里没有 `data/`、`dist/`、`node_modules/`、`.venv*`。
+- 确认没有真实 API Key、SSH 私钥、服务器密码、个人域名部署配置。
+- 确认 README 里的数据包文件名和实际上传文件一致。
+- 确认 `launchers/start_gsearch.ps1` 能从 `.env` 读取 `ZHIPU_API_KEY`。
+- 确认 `node --check gcores_crawler/frontend/assets/app.js` 通过。
+- 确认 `python -m py_compile` 对核心源码通过。
+
+发布数据包前：
+
+- 确认压缩包解压后根目录是 `data/`。
+- 确认包含 `data/catalog.sqlite`。
+- 确认包含 `data/reports/search_ui_meta.json`。
+- 确认包含 `data/lexicon/alias_map.json`。
+- 确认包含 `data/qdrant_release_storage/`。

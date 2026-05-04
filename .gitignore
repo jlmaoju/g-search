@@ -1,25 +1,31 @@
-# Local data and releases
+# Downloaded runtime data package
 /data/
-/dist/
+
+# Local Qdrant / generated indexes
 /qdrant/
+/qdrant_empty/
 /qdrant_smoke/
-/vendor/
-/research/
 
-# Virtual environments
+# Build and release outputs
+/dist/
+/release/
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# Python environments and caches
 /.venv*/
-
-# Local secrets and configs
-config/secrets/
-*.secret
-.env
-
-# Python caches
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Local secrets
+.env
+config/secrets/
+*.secret
 
 # Logs and databases
 *.log
@@ -27,9 +33,10 @@ __pycache__/
 *.sqlite-*
 *.db
 
-# Build outputs
-*.zip
-.build/
+# Local bulky/private workspace material
+/vendor/
+/research/
+/node_modules/
 
 # OS/editor noise
 .DS_Store

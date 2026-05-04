@@ -8,7 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-import torch
+try:
+    import torch
+except ImportError as exc:  # pragma: no cover - optional ASR dependency
+    torch = None  # type: ignore[assignment]
+    TORCH_IMPORT_ERROR: ImportError | None = exc
+else:
+    TORCH_IMPORT_ERROR = None
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,14 +22,35 @@ FIRERED_ROOT = ROOT / "vendor" / "FireRedASR2S"
 if str(FIRERED_ROOT) not in sys.path:
     sys.path.insert(0, str(FIRERED_ROOT))
 
-from fireredasr2s import FireRedAsr2System, FireRedAsr2SystemConfig
-from fireredasr2s.fireredasr2 import FireRedAsr2Config
-from fireredasr2s.fireredlid import FireRedLidConfig
-from fireredasr2s.fireredpunc import FireRedPuncConfig
-from fireredasr2s.fireredvad import FireRedVadConfig
+try:
+    from fireredasr2s import FireRedAsr2System, FireRedAsr2SystemConfig
+    from fireredasr2s.fireredasr2 import FireRedAsr2Config
+    from fireredasr2s.fireredlid import FireRedLidConfig
+    from fireredasr2s.fireredpunc import FireRedPuncConfig
+    from fireredasr2s.fireredvad import FireRedVadConfig
+except ImportError as exc:  # pragma: no cover - optional ASR dependency
+    FireRedAsr2System = None  # type: ignore[assignment]
+    FireRedAsr2SystemConfig = None  # type: ignore[assignment]
+    FireRedAsr2Config = None  # type: ignore[assignment]
+    FireRedLidConfig = None  # type: ignore[assignment]
+    FireRedPuncConfig = None  # type: ignore[assignment]
+    FireRedVadConfig = None  # type: ignore[assignment]
+    FIRERED_IMPORT_ERROR: ImportError | None = exc
+else:
+    FIRERED_IMPORT_ERROR = None
 
 
 MODEL_ROOT = FIRERED_ROOT / "pretrained_models"
+
+
+def ensure_firered_dependencies() -> None:
+    if TORCH_IMPORT_ERROR is not None:
+        raise RuntimeError("FireRed ASR requires the optional torch dependency") from TORCH_IMPORT_ERROR
+    if FIRERED_IMPORT_ERROR is not None:
+        raise RuntimeError(
+            "FireRed ASR requires the optional FireRedASR2S vendor package. "
+            "Install or place it under vendor/FireRedASR2S before using FireRed transcription."
+        ) from FIRERED_IMPORT_ERROR
 
 
 @dataclass
@@ -39,6 +66,7 @@ class FireRedRuntimeConfig:
 
 class FireRedRunner:
     def __init__(self, config: FireRedRuntimeConfig | None = None) -> None:
+        ensure_firered_dependencies()
         self.config = config or FireRedRuntimeConfig()
         self.use_gpu = torch.cuda.is_available()
         self.enable_lid = has_lid_model() and not self.config.disable_lid
@@ -93,6 +121,7 @@ def build_system(
     beam_size: int,
     return_timestamp: bool,
 ) -> FireRedAsr2System:
+    ensure_firered_dependencies()
     vad_config = FireRedVadConfig(
         use_gpu=use_gpu,
         smooth_window_size=5,

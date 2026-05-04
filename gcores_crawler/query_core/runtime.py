@@ -112,6 +112,55 @@ def annotate_recall_hits(hits: List[dict], *, recall_stage: str) -> List[dict]:
     return annotated
 
 
+def build_lexical_hits_from_catalog_rows(rows: Sequence[dict]) -> List[dict]:
+    if not rows:
+        return []
+    max_lexical_score = max(float(row.get("lexical_score") or 0.0) for row in rows) or 1.0
+    hits: List[dict] = []
+    for row in rows:
+        payload = dict(row.get("_payload") or {})
+        payload.setdefault("doc_id", row.get("doc_id"))
+        payload.setdefault("doc_type", row.get("doc_type"))
+        payload.setdefault("item_key", row.get("item_key"))
+        payload.setdefault("item_id", row.get("item_id"))
+        payload.setdefault("item_title", row.get("item_title"))
+        payload.setdefault("title", row.get("title"))
+        payload.setdefault("start_ms", row.get("start_ms"))
+        payload.setdefault("end_ms", row.get("end_ms"))
+        payload.setdefault("timeline_ms", row.get("timeline_ms"))
+        payload.setdefault("vector_text", row.get("vector_text"))
+        payload.setdefault("keyword_text", row.get("keyword_text"))
+        payload.setdefault("text_search", row.get("text_search"))
+        payload.setdefault("text_raw", row.get("text_raw"))
+        payload.setdefault("doc_index", row.get("doc_index", 0))
+        lexical_score = float(row.get("lexical_score") or 0.0)
+        hits.append(
+            {
+                "doc_id": row.get("doc_id"),
+                "doc_type": row.get("doc_type"),
+                "score": 0.42 + 0.40 * (lexical_score / max_lexical_score),
+                "start_ms": row.get("start_ms"),
+                "end_ms": row.get("end_ms"),
+                "timeline_ms": row.get("timeline_ms"),
+                "vector_text": row.get("vector_text"),
+                "keyword_text": row.get("keyword_text"),
+                "text_raw": row.get("text_raw"),
+                "text_search": row.get("text_search"),
+                "payload": payload,
+            }
+        )
+    return hits
+
+
+def semantic_degradation_message(error: str) -> str:
+    lowered = str(error or "").lower()
+    if "1113" in lowered or "余额不足" in error or "资源包" in error:
+        return "语义检索额度不足，当前显示的是关键词降级结果，相关性和排序质量会明显下降。"
+    if "timed out" in lowered or "timeout" in lowered:
+        return "语义检索服务响应超时，当前显示的是关键词降级结果，相关性和排序质量会下降。"
+    return "语义检索服务暂时不可用，当前显示的是关键词降级结果，相关性和排序质量会下降。"
+
+
 def get_episode_details(
     item_id: str,
     *,
@@ -217,38 +266,56 @@ def run_search_query_with_runtime(
     resolved_tuning = tuning or SearchTuning()
     normalized_query, replacements = replace_aliases(query, resolved_alias_map)
     query_terms = extract_query_terms(normalized_query)
-    embedding = qdrant.embed_query(normalized_query)
     categories_list = [value.strip() for value in (categories or []) if str(value).strip()]
     participants_list = [value.strip() for value in (participants or []) if str(value).strip()]
     scope_doc_types = resolve_search_scope_doc_types(scope, requested_doc_types=doc_types)
     primary_limit = max(limit, int(resolved_tuning.candidate_limit))
-    primary_hits = annotate_recall_hits(
-        qdrant.query(
-            vector=embedding,
-            limit=primary_limit,
-            doc_types=scope_doc_types,
-            categories=categories_list,
-            participants=participants_list,
-        ),
-        recall_stage="primary",
-    )
-    raw_candidates = list(primary_hits)
+    semantic_error: Optional[str] = None
     atom_second_pass_limit = 0
-    if should_run_atom_second_pass(scope=scope, tuning=resolved_tuning):
-        atom_second_pass_limit = resolve_atom_second_pass_limit(limit=limit, tuning=resolved_tuning)
-        if atom_second_pass_limit > 0:
-            raw_candidates.extend(
-                annotate_recall_hits(
-                    qdrant.query(
-                        vector=embedding,
-                        limit=atom_second_pass_limit,
-                        doc_types=["evidence_atom"],
-                        categories=categories_list,
-                        participants=participants_list,
-                    ),
-                    recall_stage="second_pass_atom",
+    try:
+        embedding = qdrant.embed_query(normalized_query)
+        primary_hits = annotate_recall_hits(
+            qdrant.query(
+                vector=embedding,
+                limit=primary_limit,
+                doc_types=scope_doc_types,
+                categories=categories_list,
+                participants=participants_list,
+            ),
+            recall_stage="primary",
+        )
+        raw_candidates = list(primary_hits)
+        if should_run_atom_second_pass(scope=scope, tuning=resolved_tuning):
+            atom_second_pass_limit = resolve_atom_second_pass_limit(limit=limit, tuning=resolved_tuning)
+            if atom_second_pass_limit > 0:
+                raw_candidates.extend(
+                    annotate_recall_hits(
+                        qdrant.query(
+                            vector=embedding,
+                            limit=atom_second_pass_limit,
+                            doc_types=["evidence_atom"],
+                            categories=categories_list,
+                            participants=participants_list,
+                        ),
+                        recall_stage="second_pass_atom",
+                    )
                 )
-            )
+    except Exception as exc:
+        semantic_error = str(exc)
+        primary_hits = annotate_recall_hits(
+            build_lexical_hits_from_catalog_rows(
+                catalog.search_documents_by_terms(
+                    query_terms=query_terms,
+                    collection_name=config.collection_name,
+                    doc_types=scope_doc_types,
+                    categories=categories_list,
+                    participants=participants_list,
+                    limit=primary_limit,
+                )
+            ),
+            recall_stage="lexical_fallback",
+        )
+        raw_candidates = list(primary_hits)
     raw_hits = dedupe_hits_by_doc_id(raw_candidates)
     reranked = rerank_hits(raw_hits=raw_hits, query_terms=query_terms, tuning=resolved_tuning)
     diversified = diversify_hits(
@@ -266,7 +333,7 @@ def run_search_query_with_runtime(
         )
         for hit in diversified
     ]
-    return {
+    payload = {
         "query": query,
         "normalized_query": normalized_query,
         "alias_replacements": replacements,
@@ -293,9 +360,17 @@ def run_search_query_with_runtime(
             "second_pass_atom_hits": max(0, len(raw_candidates) - len(primary_hits)),
             "second_pass_atom_limit": atom_second_pass_limit,
             "merged_hits": len(raw_hits),
+            "lexical_fallback": bool(semantic_error),
         },
         "results": results,
     }
+    if semantic_error:
+        payload["degraded"] = True
+        payload["degraded_reason"] = "semantic_recall_unavailable"
+        payload["degraded_message"] = semantic_degradation_message(semantic_error)
+        payload["degraded_detail"] = "本次没有使用向量语义召回，只使用本地关键词索引进行降级检索。"
+        payload["semantic_error"] = semantic_error[:500]
+    return payload
 
 
 def resolve_hit_keyword_text(hit: dict) -> str:

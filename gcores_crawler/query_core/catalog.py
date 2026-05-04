@@ -3,9 +3,21 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, List, Optional
+from typing import Any, Iterable, List, Optional, Sequence
 
 from ..catalog import Catalog, normalize_search_collection_name, use_legacy_search_documents
+
+
+def escape_like_pattern(value: str) -> str:
+    return str(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def parse_payload_json(value: object) -> dict[str, Any]:
+    try:
+        payload = json.loads(str(value or "{}"))
+    except Exception:
+        payload = {}
+    return payload if isinstance(payload, dict) else {}
 
 
 class QueryCatalog:
@@ -194,6 +206,89 @@ class QueryCatalog:
             doc_ids=doc_ids,
             collection_name=collection_name,
         )
+
+    def search_documents_by_terms(
+        self,
+        *,
+        query_terms: Sequence[str],
+        collection_name: Optional[str] = None,
+        doc_types: Optional[Iterable[str]] = None,
+        categories: Optional[Iterable[str]] = None,
+        participants: Optional[Iterable[str]] = None,
+        limit: int = 200,
+    ) -> List[dict]:
+        terms: list[str] = []
+        for value in query_terms:
+            term = str(value or "").strip()
+            if len(term) <= 1 or term in terms:
+                continue
+            terms.append(term)
+            if len(terms) >= 24:
+                break
+        if not terms:
+            return []
+
+        table_name = "search_documents"
+        clauses: list[str] = []
+        params: list[object] = []
+        if not use_legacy_search_documents(collection_name):
+            table_name = "search_documents_scoped"
+            clauses.append("collection_name = ?")
+            params.append(normalize_search_collection_name(collection_name))
+
+        doc_type_list = [str(value).strip() for value in (doc_types or []) if str(value).strip()]
+        if doc_type_list:
+            clauses.append(f"doc_type IN ({', '.join('?' for _ in doc_type_list)})")
+            params.extend(doc_type_list)
+
+        search_expr = (
+            "COALESCE(title, '') || ' ' || "
+            "COALESCE(item_title, '') || ' ' || "
+            "COALESCE(keyword_text, '') || ' ' || "
+            "COALESCE(text_search, '')"
+        )
+        score_params: list[object] = []
+        score_parts: list[str] = []
+        like_clauses: list[str] = []
+        like_params: list[object] = []
+        for term in terms:
+            pattern = f"%{escape_like_pattern(term)}%"
+            term_weight = min(12, max(2, len(term)))
+            score_parts.append(f"(CASE WHEN {search_expr} LIKE ? ESCAPE '\\' THEN ? ELSE 0 END)")
+            score_params.extend([pattern, term_weight])
+            like_clauses.append(f"{search_expr} LIKE ? ESCAPE '\\'")
+            like_params.append(pattern)
+        clauses.append(f"({' OR '.join(like_clauses)})")
+
+        sql_limit = max(100, min(5000, int(limit or 200) * 8))
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = f"""
+            SELECT *, ({' + '.join(score_parts)}) AS lexical_score
+            FROM {table_name}
+            {where}
+            ORDER BY lexical_score DESC, doc_type ASC, item_key ASC, doc_index ASC
+            LIMIT ?
+        """
+        with self._catalog._connect() as connection:
+            rows = connection.execute(query, [*score_params, *params, *like_params, sql_limit]).fetchall()
+
+        category_values = {str(value).strip() for value in (categories or []) if str(value).strip()}
+        participant_values = [str(value).strip() for value in (participants or []) if str(value).strip()]
+        results: list[dict] = []
+        for row in rows:
+            payload = parse_payload_json(row["payload_json"])
+            if category_values and str(payload.get("category") or "") not in category_values:
+                continue
+            if participant_values:
+                users = {str(value) for value in (payload.get("users") or [])}
+                if any(value not in users for value in participant_values):
+                    continue
+            item = dict(row)
+            item["_payload"] = payload
+            results.append(item)
+            if len(results) >= limit:
+                break
+        return results
 
     def get_evidence_atoms_by_item_key_and_doc_index_range(
         self,

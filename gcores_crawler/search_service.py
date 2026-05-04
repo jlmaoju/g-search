@@ -14,6 +14,7 @@ from urllib.request import Request as UrlRequest, urlopen
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from .query_core import (
     DEFAULT_COLLECTION,
@@ -275,7 +276,8 @@ def create_search_app(
             multi_hit_weight=multi_hit_weight,
         )
         try:
-            payload = request.app.state.runtime.search(
+            payload = await run_in_threadpool(
+                request.app.state.runtime.search,
                 q,
                 limit=limit,
                 scope=scope,

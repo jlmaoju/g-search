@@ -1,11 +1,11 @@
-# 核心运行时
+# Minimal runtime for downloaded-data search service
 fastapi
 uvicorn
 qdrant-client
 numpy
 requests
 
-# 音频 / ASR 相关
+# Optional crawler / audio / ASR tooling
 librosa
 soundfile
 torch

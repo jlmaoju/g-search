@@ -343,6 +343,8 @@ def http_post_json(
         except urllib.error.HTTPError as exc:
             body_text = exc.read().decode("utf-8", errors="replace")
             last_error = RuntimeError(f"HTTP {exc.code} for {url}: {body_text}")
+            if exc.code == 429 and ('"1113"' in body_text or "余额不足" in body_text or "资源包" in body_text):
+                raise last_error from exc
             if exc.code not in {408, 409, 425, 429, 500, 502, 503, 504} or attempt >= max_attempts:
                 raise last_error from exc
         except urllib.error.URLError as exc:
