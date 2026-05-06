@@ -245,7 +245,7 @@ def create_search_app(
     async def search(
         request: Request,
         q: str = Query(..., min_length=1),
-        limit: int = Query(10, ge=1, le=50),
+        limit: int = Query(10, ge=1, le=200),
         scope: str = Query("content"),
         doc_types: Optional[list[str]] = Query(None),
         categories: Optional[list[str]] = Query(None),

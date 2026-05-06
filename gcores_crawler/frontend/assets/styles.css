@@ -543,6 +543,13 @@ input {
   font-size: 14px;
 }
 
+.result-sort-button {
+  min-height: 36px;
+  padding-inline: 14px;
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .empty-state {
   padding: 24px 0 8px;
   color: var(--muted);
@@ -961,6 +968,7 @@ input {
   text-align: right;
 }
 
+.settings-card,
 .viewer-status-card {
   padding: 16px 18px;
   border: 1px solid var(--line);
@@ -968,9 +976,38 @@ input {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.settings-card,
+.viewer-settings-block {
+  display: grid;
+  gap: 12px;
+}
+
 .viewer-key-form {
   display: grid;
   gap: 12px;
+}
+
+.settings-number-input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper-strong);
+  color: var(--ink);
+}
+
+.settings-number-input:focus {
+  outline: none;
+  border-color: rgba(239, 90, 60, 0.35);
+  box-shadow: 0 0 0 3px rgba(239, 90, 60, 0.18);
+}
+
+.settings-hint {
+  margin: -2px 0 2px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .field-label {

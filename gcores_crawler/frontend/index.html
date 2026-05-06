@@ -18,6 +18,7 @@
       <div class="topbar-actions">
         <div class="library-note" id="library-note">本库更新于 -</div>
         <button type="button" class="text-button" id="utility-button">关于本库</button>
+        <button type="button" class="text-button" id="settings-button">设置</button>
       </div>
     </header>
 
@@ -129,6 +130,7 @@
         <div class="results-head">
           <h2 class="results-title">搜索结果</h2>
           <div class="results-status" id="status-line">从一段记忆开始搜索。</div>
+          <button type="button" class="mini-button result-sort-button hidden" id="result-sort-time">将当前结果按时间顺序排列</button>
         </div>
         <div class="empty-state" id="empty-state"></div>
         <div class="results-list" id="results"></div>
@@ -153,22 +155,35 @@
         </section>
 
         <section class="sheet-block hidden" id="settings-panel">
-          <div class="viewer-status-card">
-            <strong>本地 Key 状态</strong>
-            <p id="viewer-key-status">正在读取本地状态...</p>
-          </div>
-          <form id="viewer-key-form" class="viewer-key-form">
-            <label class="field-label" for="viewer-api-key">智谱 API Key</label>
-            <input id="viewer-api-key" type="password" autocomplete="off" placeholder="输入你自己的智谱 API Key" />
+          <div class="settings-card">
+            <strong>搜索显示设置</strong>
+            <label class="field-label" for="result-limit">显示前 N 个结果</label>
+            <input id="result-limit" class="settings-number-input" type="number" min="1" max="200" step="1" inputmode="numeric" />
+            <p class="settings-hint">上限 200。数值越大，搜索和渲染耗时可能越长。</p>
             <label class="check-row">
-              <input id="viewer-session-only" type="checkbox" />
-              <span>仅本次会话使用</span>
+              <input id="auto-expand-details" type="checkbox" />
+              <span>自动展开搜索结果详情</span>
             </label>
-            <div class="sheet-actions">
-              <button type="submit" class="search-button">保存 Key</button>
-              <button type="button" class="mini-button" id="viewer-clear-key">清除 Key</button>
+          </div>
+
+          <div class="viewer-settings-block" id="viewer-settings-block">
+            <div class="viewer-status-card">
+              <strong>本地 Key 状态</strong>
+              <p id="viewer-key-status">正在读取本地状态...</p>
             </div>
-          </form>
+            <form id="viewer-key-form" class="viewer-key-form">
+              <label class="field-label" for="viewer-api-key">智谱 API Key</label>
+              <input id="viewer-api-key" type="password" autocomplete="off" placeholder="输入你自己的智谱 API Key" />
+              <label class="check-row">
+                <input id="viewer-session-only" type="checkbox" />
+                <span>仅本次会话使用</span>
+              </label>
+              <div class="sheet-actions">
+                <button type="submit" class="search-button">保存 Key</button>
+                <button type="button" class="mini-button" id="viewer-clear-key">清除 Key</button>
+              </div>
+            </form>
+          </div>
         </section>
       </div>
     </section>

@@ -10,6 +10,10 @@ const ABOUT_LABELS = {
 
 const BACKEND_MAINTENANCE_MESSAGE = "后端正在维护，请稍后重试（或联系作者PHSJ2019）";
 const DEGRADED_SEARCH_DEFAULT_MESSAGE = "语义检索服务暂时不可用，当前显示的是关键词降级结果，相关性和排序质量会下降。";
+const RESULT_LIMIT_STORAGE_KEY = "gsearch.resultLimit";
+const AUTO_EXPAND_STORAGE_KEY = "gsearch.autoExpandDetails";
+const DEFAULT_RESULT_LIMIT = 50;
+const MAX_RESULT_LIMIT = 200;
 
 const state = {
   runtimeConfig: {
@@ -24,8 +28,12 @@ const state = {
   selectedParticipants: new Set(),
   scope: "content",
   results: [],
-  expandedResultDocId: null,
+  expandedResultDocIds: new Set(),
+  collapsedResultDocIds: new Set(),
   lastPayload: null,
+  resultLimit: readSavedResultLimit(),
+  autoExpandDetails: readSavedAutoExpandDetails(),
+  resultsSortedByTime: false,
   participantQuery: "",
   activeFilterTab: "categories",
   filterDropdownOpen: false,
@@ -46,6 +54,7 @@ const ABOUT_PANEL_LABELS = {
 const els = {
   modePill: document.getElementById("mode-pill"),
   utilityButton: document.getElementById("utility-button"),
+  settingsButton: document.getElementById("settings-button"),
   libraryNote: document.getElementById("library-note"),
   heroKicker: document.getElementById("hero-kicker"),
   pageTitle: document.getElementById("page-title"),
@@ -62,6 +71,7 @@ const els = {
   filterTabs: document.getElementById("filter-tabs"),
   activeFilters: document.getElementById("active-filters"),
   statusLine: document.getElementById("status-line"),
+  resultSortTime: document.getElementById("result-sort-time"),
   emptyState: document.getElementById("empty-state"),
   results: document.getElementById("results"),
   sheetRoot: document.getElementById("sheet-root"),
@@ -77,6 +87,9 @@ const els = {
   filterSummaryText: document.getElementById("filter-summary-text"),
   clearFilters: document.getElementById("clear-filters"),
   aboutMetaList: document.getElementById("about-meta-list"),
+  resultLimit: document.getElementById("result-limit"),
+  autoExpandDetails: document.getElementById("auto-expand-details"),
+  viewerSettingsBlock: document.getElementById("viewer-settings-block"),
   viewerKeyForm: document.getElementById("viewer-key-form"),
   viewerApiKey: document.getElementById("viewer-api-key"),
   viewerSessionOnly: document.getElementById("viewer-session-only"),
@@ -87,6 +100,40 @@ const els = {
 
 let backendToastTimer = 0;
 const PROGRAM_TYPE_LABEL_OVERRIDES = new Map([["会员专享", "会员专享（免费部分）"]]);
+
+function clampInteger(value, { min, max, fallback }) {
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function readStorageValue(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorageValue(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Settings still work for the current session if storage is unavailable.
+  }
+}
+
+function readSavedResultLimit() {
+  return clampInteger(readStorageValue(RESULT_LIMIT_STORAGE_KEY), {
+    min: 1,
+    max: MAX_RESULT_LIMIT,
+    fallback: DEFAULT_RESULT_LIMIT,
+  });
+}
+
+function readSavedAutoExpandDetails() {
+  return readStorageValue(AUTO_EXPAND_STORAGE_KEY) === "true";
+}
 
 function apiUrl(path) {
   const base = (state.runtimeConfig.apiBase || "").replace(/\/$/, "");
@@ -246,6 +293,47 @@ function hasExpandableContext(result, contentText) {
   return Boolean((contentText && contentText.length > 110) || neighborCount > 0);
 }
 
+function resultDocId(result) {
+  return String(result?.doc_id || "");
+}
+
+function isResultExpanded(result, contentText) {
+  const docId = resultDocId(result);
+  if (!docId || !hasExpandableContext(result, contentText)) return false;
+  if (state.autoExpandDetails) {
+    return !state.collapsedResultDocIds.has(docId);
+  }
+  return state.expandedResultDocIds.has(docId);
+}
+
+function clearResultExpansionState() {
+  state.expandedResultDocIds.clear();
+  state.collapsedResultDocIds.clear();
+}
+
+function resultChronologicalTimestamp(result) {
+  const publishedAt = Date.parse(result?.published_at || result?.timeline_at || "");
+  if (!Number.isFinite(publishedAt)) return Number.POSITIVE_INFINITY;
+  const offset = Number(result?.start_ms ?? result?.timeline_ms ?? 0);
+  return publishedAt + (Number.isFinite(offset) ? offset : 0);
+}
+
+function sortCurrentResultsByTime() {
+  if ((state.results || []).length < 2) return;
+  state.results = [...state.results].sort((left, right) => {
+    const leftTime = resultChronologicalTimestamp(left);
+    const rightTime = resultChronologicalTimestamp(right);
+    if (leftTime !== rightTime) return leftTime - rightTime;
+    return resultDocId(left).localeCompare(resultDocId(right));
+  });
+  if (state.lastPayload) {
+    state.lastPayload = { ...state.lastPayload, results: state.results };
+  }
+  state.resultsSortedByTime = true;
+  updateStatusFromPayload(state.lastPayload || { results: state.results });
+  renderResults();
+}
+
 function renderContextPanel(result, contentText) {
   const fullText = contentText
     ? `
@@ -280,7 +368,18 @@ function renderContextPanel(result, contentText) {
 }
 
 function toggleResultContext(docId) {
-  state.expandedResultDocId = state.expandedResultDocId === docId ? null : docId;
+  if (!docId) return;
+  if (state.autoExpandDetails) {
+    if (state.collapsedResultDocIds.has(docId)) {
+      state.collapsedResultDocIds.delete(docId);
+    } else {
+      state.collapsedResultDocIds.add(docId);
+    }
+  } else if (state.expandedResultDocIds.has(docId)) {
+    state.expandedResultDocIds.delete(docId);
+  } else {
+    state.expandedResultDocIds.add(docId);
+  }
   renderResults();
 }
 
@@ -291,7 +390,8 @@ function renderMeta(meta) {
   els.pageTitle.textContent = meta.title || "机核电台记忆检索";
   const updatedAt = meta.library_updated_at || meta.manifest?.built_at;
   els.libraryNote.textContent = `本库更新于 ${formatDateLabel(updatedAt)}`;
-  els.utilityButton.textContent = meta.mode === "viewer" ? "设置" : "关于本库";
+  els.utilityButton.textContent = "关于本库";
+  els.settingsButton.textContent = "设置";
   if (meta.mode === "viewer") {
     els.modePill.textContent = meta.mode_label || "本地版";
     els.modePill.classList.remove("hidden");
@@ -300,6 +400,7 @@ function renderMeta(meta) {
   }
   renderAboutPanel(meta);
   renderViewerStatus(meta.viewer);
+  renderSearchSettingsControls();
 }
 
 function renderAboutPanel(meta) {
@@ -332,13 +433,40 @@ function renderAboutPanel(meta) {
 }
 
 function renderViewerStatus(payload) {
+  els.viewerSettingsBlock.classList.toggle("hidden", !payload);
   if (!payload) {
-    els.viewerKeyStatus.textContent = "当前不是本地版。";
+    els.viewerKeyStatus.textContent = "当前在线版不需要在浏览器里保存 Key。";
     return;
   }
   const secureText = payload.secure_store_supported ? "支持安全存储" : "当前平台未启用安全存储";
   const keyText = payload.effective_key_present ? "已加载可用 Key" : "尚未加载 Key";
   els.viewerKeyStatus.textContent = `${payload.platform} · ${secureText} · ${keyText}`;
+}
+
+function renderSearchSettingsControls() {
+  els.resultLimit.value = String(state.resultLimit);
+  els.autoExpandDetails.checked = Boolean(state.autoExpandDetails);
+}
+
+function applyResultLimitSetting({ rerun = true } = {}) {
+  const nextLimit = clampInteger(els.resultLimit.value, {
+    min: 1,
+    max: MAX_RESULT_LIMIT,
+    fallback: state.resultLimit,
+  });
+  state.resultLimit = nextLimit;
+  els.resultLimit.value = String(nextLimit);
+  writeStorageValue(RESULT_LIMIT_STORAGE_KEY, String(nextLimit));
+  if (rerun && els.query.value.trim()) {
+    runSearch();
+  }
+}
+
+function applyAutoExpandSetting() {
+  state.autoExpandDetails = Boolean(els.autoExpandDetails.checked);
+  writeStorageValue(AUTO_EXPAND_STORAGE_KEY, state.autoExpandDetails ? "true" : "false");
+  clearResultExpansionState();
+  renderResults();
 }
 
 function renderFilters(filterPayload) {
@@ -586,8 +714,9 @@ function openSheet(kind) {
   els.aboutPanel.classList.toggle("hidden", kind !== "about");
   els.settingsPanel.classList.toggle("hidden", kind !== "settings");
   if (kind === "settings") {
-    els.sheetKicker.textContent = "本地版";
+    els.sheetKicker.textContent = "偏好设置";
     els.sheetTitle.textContent = "设置";
+    renderSearchSettingsControls();
   } else {
     els.sheetKicker.textContent = "关于本库";
     els.sheetTitle.textContent = "当前索引";
@@ -614,13 +743,13 @@ function renderResultCard(result) {
   const image = resultImage(result);
   const metaLine = composeMetaLine(result);
   const isTimeline = result.doc_type === "timeline_note";
-  const isExpanded = state.expandedResultDocId === result.doc_id;
   const isSemanticHit = !((result.matched_terms || []).length);
   const coverMarkup = image
     ? `<img class="result-cover" src="${escapeHtml(image)}" alt="${escapeHtml(result.item_title || "节目封面")}" loading="lazy" />`
     : `<div class="result-cover is-fallback" aria-hidden="true"></div>`;
   const contentText = result.display_text || (result.doc_type === "timeline_note" ? result.timeline_content : "");
   const canExpand = hasExpandableContext(result, contentText);
+  const isExpanded = isResultExpanded(result, contentText);
   const timelineFeature = isTimeline && result.timeline_asset_url
     ? `
       <div class="timeline-feature">
@@ -660,8 +789,19 @@ function renderResultCard(result) {
   `;
 }
 
+function renderResultTools() {
+  const count = (state.results || []).length;
+  const canSort = count > 1;
+  els.resultSortTime.classList.toggle("hidden", !canSort);
+  if (!canSort) return;
+  els.resultSortTime.textContent = state.resultsSortedByTime
+    ? `已按时间顺序排列（当前 ${count} 个）`
+    : `将当前 ${count} 个结果按时间顺序排列`;
+}
+
 function renderResults() {
   const results = state.results || [];
+  renderResultTools();
   els.results.innerHTML = `${renderDegradedNotice(state.lastPayload)}${results.map(renderResultCard).join("")}`;
   els.emptyState.classList.toggle("hidden", results.length > 0);
   if (!results.length) {
@@ -712,8 +852,9 @@ function updateStatusFromPayload(payload) {
     : `这里是相关度前 ${count} 的结果`;
   const summary = selectedFilterSummary();
   const filters = summary ? ` · 已筛选 ${summary}` : "";
+  const sortHint = state.resultsSortedByTime ? " · 已按时间顺序排列" : "";
   const degradedHint = isDegradedPayload(payload) ? `。${degradedSearchMessage(payload)}` : "";
-  els.statusLine.textContent = `${baseText}${filters}${degradedHint}`;
+  els.statusLine.textContent = `${baseText}${filters}${sortHint}${degradedHint}`;
 }
 
 async function loadRuntimeConfig() {
@@ -747,7 +888,7 @@ function buildSearchParams(query) {
   const params = new URLSearchParams();
   params.set("q", query);
   params.set("scope", state.scope);
-  params.set("limit", "50");
+  params.set("limit", String(state.resultLimit));
   const docTypes = state.scope === "timeline"
     ? ["timeline_note"]
     : state.scope === "title"
@@ -806,7 +947,8 @@ async function runSearch(event) {
     }
     state.lastPayload = payload;
     state.results = payload.results || [];
-    state.expandedResultDocId = null;
+    state.resultsSortedByTime = false;
+    clearResultExpansionState();
     updateStatusFromPayload(payload);
     renderResults();
   } catch (error) {
@@ -961,9 +1103,14 @@ function bindEvents() {
     if (!button) return;
     setFilterTab(button.dataset.filterTab || "categories");
   });
-  els.utilityButton.addEventListener("click", () => openSheet(state.meta?.mode === "viewer" ? "settings" : "about"));
+  els.utilityButton.addEventListener("click", () => openSheet("about"));
+  els.settingsButton.addEventListener("click", () => openSheet("settings"));
   els.sheetBackdrop.addEventListener("click", closeSheet);
   els.sheetClose.addEventListener("click", closeSheet);
+  els.resultLimit.addEventListener("change", () => applyResultLimitSetting());
+  els.resultLimit.addEventListener("blur", () => applyResultLimitSetting({ rerun: false }));
+  els.autoExpandDetails.addEventListener("change", applyAutoExpandSetting);
+  els.resultSortTime.addEventListener("click", sortCurrentResultsByTime);
   els.clearFilters.addEventListener("click", () => {
     state.selectedProgramTypes.clear();
     state.selectedParticipants.clear();
@@ -1029,6 +1176,7 @@ async function bootstrap() {
   bindEvents();
   setSearchAvailability(true);
   setScope(state.scope);
+  renderSearchSettingsControls();
   await loadRuntimeConfig();
   try {
     await loadMetaAndParticipants();
