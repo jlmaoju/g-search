@@ -11,6 +11,7 @@ G-Search 是一个面向机核公开播客内容的本地搜索服务。源码�
 - Docker Desktop，推荐安装。它用于启动 Qdrant 向量库。
 - 你自己的智谱 BigModel / Zhipu API Key。完整语义检索需要它。
 - 单独下载的数据包：`gsearch-data-release-2026-04-29.tar.gz`。
+- 数据包下载链接：待补充。上传网盘后，把链接填到本行。
 
 如果你不填 Key，服务仍然可以启动，但搜索会进入关键词降级模式。页面顶部会明确提示“降级检索”，不会静默把降级结果当成完整语义检索结果。
 
@@ -36,8 +37,8 @@ ZHIPU_API_KEY=your_zhipu_key_here
 1. 克隆源码。
 
 ```powershell
-git clone https://github.com/YOUR_NAME/YOUR_REPO.git
-cd YOUR_REPO
+git clone https://github.com/jlmaoju/g-search.git
+cd g-search
 ```
 
 2. 创建 Python 环境并安装依赖。
@@ -96,10 +97,22 @@ http://127.0.0.1:8765
 
 数据不放进 GitHub。公开源码只包含程序，运行数据单独下载。
 
+数据包下载链接：
+
+```text
+待补充：上传网盘后，把公开下载链接填到这里。
+```
+
 数据包文件名：
 
 ```text
 gsearch-data-release-2026-04-29.tar.gz
+```
+
+SHA256：
+
+```text
+6E48B21EE2C993E9EBDAC3F3780C5BB5EC79D2A4BB2636989E0168725FED2901
 ```
 
 数据包解压后会生成：

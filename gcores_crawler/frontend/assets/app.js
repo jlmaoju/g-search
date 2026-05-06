@@ -14,6 +14,7 @@ const RESULT_LIMIT_STORAGE_KEY = "gsearch.resultLimit";
 const AUTO_EXPAND_STORAGE_KEY = "gsearch.autoExpandDetails";
 const DEFAULT_RESULT_LIMIT = 50;
 const MAX_RESULT_LIMIT = 200;
+const OPEN_SOURCE_REPO_URL = "https://github.com/jlmaoju/g-search";
 
 const state = {
   runtimeConfig: {
@@ -49,7 +50,7 @@ const ABOUT_PANEL_LABELS = {
   timeline_notes: "时间轴数",
   participants_count: "参与者数",
   database_size: "数据库大小",
-  viewer_download: "本机版本下载",
+  viewer_download: "本项目开源仓库",
 };
 
 const els = {
@@ -416,9 +417,7 @@ function renderMeta(meta) {
 
 function renderAboutPanel(meta) {
   const timelineCount = Number(meta.doc_type_counts?.timeline_note || meta.manifest?.doc_type_counts?.timeline_note || 0);
-  const downloadValue = meta.download_url
-    ? `<a class="text-link" href="${escapeHtml(meta.download_url)}" target="_blank" rel="noopener noreferrer">立即下载</a>`
-    : "待发布";
+  const repoValue = `<a class="text-link" href="${escapeHtml(OPEN_SOURCE_REPO_URL)}" target="_blank" rel="noopener noreferrer">GitHub 仓库</a>`;
   const entries = [
     ["mode_label", meta.mode_label || "-"],
     ["library_updated_at", formatDateLabel(meta.library_updated_at || meta.manifest?.built_at)],
@@ -426,7 +425,7 @@ function renderAboutPanel(meta) {
     ["timeline_notes", String(timelineCount || "-")],
     ["participants_count", String(meta.participants_count || 0)],
     ["database_size", formatBytes(meta.database_size_bytes)],
-    ["viewer_download", downloadValue],
+    ["viewer_download", repoValue],
   ];
   els.aboutMetaList.innerHTML = `
     <div class="about-note-card">
