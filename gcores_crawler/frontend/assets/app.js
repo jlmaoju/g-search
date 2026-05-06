@@ -28,6 +28,7 @@ const state = {
   selectedParticipants: new Set(),
   scope: "content",
   results: [],
+  relevanceOrderedResults: [],
   expandedResultDocIds: new Set(),
   collapsedResultDocIds: new Set(),
   lastPayload: null,
@@ -318,18 +319,28 @@ function resultChronologicalTimestamp(result) {
   return publishedAt + (Number.isFinite(offset) ? offset : 0);
 }
 
-function sortCurrentResultsByTime() {
-  if ((state.results || []).length < 2) return;
-  state.results = [...state.results].sort((left, right) => {
-    const leftTime = resultChronologicalTimestamp(left);
-    const rightTime = resultChronologicalTimestamp(right);
-    if (leftTime !== rightTime) return leftTime - rightTime;
-    return resultDocId(left).localeCompare(resultDocId(right));
-  });
+function syncResultPayload() {
   if (state.lastPayload) {
     state.lastPayload = { ...state.lastPayload, results: state.results };
   }
-  state.resultsSortedByTime = true;
+}
+
+function toggleCurrentResultsTimeSort() {
+  if ((state.results || []).length < 2) return;
+  if (state.resultsSortedByTime) {
+    const relevanceResults = state.relevanceOrderedResults.length ? state.relevanceOrderedResults : state.results;
+    state.results = [...relevanceResults];
+    state.resultsSortedByTime = false;
+  } else {
+    state.results = [...state.results].sort((left, right) => {
+      const leftTime = resultChronologicalTimestamp(left);
+      const rightTime = resultChronologicalTimestamp(right);
+      if (leftTime !== rightTime) return leftTime - rightTime;
+      return resultDocId(left).localeCompare(resultDocId(right));
+    });
+    state.resultsSortedByTime = true;
+  }
+  syncResultPayload();
   updateStatusFromPayload(state.lastPayload || { results: state.results });
   renderResults();
 }
@@ -795,7 +806,7 @@ function renderResultTools() {
   els.resultSortTime.classList.toggle("hidden", !canSort);
   if (!canSort) return;
   els.resultSortTime.textContent = state.resultsSortedByTime
-    ? `已按时间顺序排列（当前 ${count} 个）`
+    ? `恢复按语义相关度排序（当前 ${count} 个）`
     : `将当前 ${count} 个结果按时间顺序排列`;
 }
 
@@ -947,6 +958,7 @@ async function runSearch(event) {
     }
     state.lastPayload = payload;
     state.results = payload.results || [];
+    state.relevanceOrderedResults = [...state.results];
     state.resultsSortedByTime = false;
     clearResultExpansionState();
     updateStatusFromPayload(payload);
@@ -1110,7 +1122,7 @@ function bindEvents() {
   els.resultLimit.addEventListener("change", () => applyResultLimitSetting());
   els.resultLimit.addEventListener("blur", () => applyResultLimitSetting({ rerun: false }));
   els.autoExpandDetails.addEventListener("change", applyAutoExpandSetting);
-  els.resultSortTime.addEventListener("click", sortCurrentResultsByTime);
+  els.resultSortTime.addEventListener("click", toggleCurrentResultsTimeSort);
   els.clearFilters.addEventListener("click", () => {
     state.selectedProgramTypes.clear();
     state.selectedParticipants.clear();
