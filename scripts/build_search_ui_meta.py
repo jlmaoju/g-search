@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build a precomputed UI meta snapshot for the search frontend.")
     parser.add_argument("--root", default=str(PROJECT_ROOT / "data"))
     parser.add_argument("--collection-name", default="gcores_memory_release_v3")
-    parser.add_argument("--participants-limit", type=int, default=160)
+    parser.add_argument("--participants-limit", type=int, default=0, help="0 includes every participant")
     parser.add_argument(
         "--output-json",
         default=str(PROJECT_ROOT / "data" / "reports" / "search_ui_meta.json"),
@@ -37,7 +37,7 @@ def main() -> int:
     payload = write_search_ui_meta_snapshot(
         root=args.root,
         collection_name=args.collection_name,
-        participants_limit=max(1, int(args.participants_limit)),
+        participants_limit=args.participants_limit if args.participants_limit > 0 else None,
         output_path=args.output_json,
     )
     safe_print_json(payload)

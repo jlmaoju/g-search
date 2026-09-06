@@ -1,0 +1,18 @@
+{
+  "results": [
+    {
+      "doc_id": "fixture:timeline:1",
+      "item_id": "fixture-episode",
+      "item_title": "检索测试节目",
+      "doc_type": "timeline_note",
+      "display_timestamp": "02:03",
+      "timeline_ms": 123000,
+      "timeline_title": "测试知识点",
+      "timeline_content": "这是人工编写的时间轴注释。",
+      "timeline_asset_url": "https://image.gcores.com/fixture-timeline.png",
+      "timeline_quote_href": "https://www.gcores.com/",
+      "cover_url": "https://image.gcores.com/fixture-cover.png",
+      "source_url": "https://www.gcores.com/"
+    }
+  ]
+}

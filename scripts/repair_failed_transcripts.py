@@ -193,7 +193,7 @@ def repair_job(root: Path, catalog: Catalog, job: dict[str, Any], *, max_chars: 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default="J:/G-Search/data")
+    parser.add_argument("--root", default=str(PROJECT_ROOT / "data"))
     parser.add_argument("--max-chars", type=int, default=800)
     parser.add_argument("--limit", type=int, default=50)
     parser.add_argument("--job-id", action="append", default=[])

@@ -8,8 +8,9 @@ const ABOUT_LABELS = {
   mode_label: "当前模式",
 };
 
-const BACKEND_MAINTENANCE_MESSAGE = "后端正在维护，请稍后重试（或联系作者PHSJ2019）";
+const BACKEND_MAINTENANCE_MESSAGE = "后端正在维护，请稍后重试（或联系作者YQBelmont贲）";
 const DEGRADED_SEARCH_DEFAULT_MESSAGE = "语义检索服务暂时不可用，当前显示的是关键词降级结果，相关性和排序质量会下降。";
+const QUOTA_REPORT_MESSAGE = "如果你看到这条提示，请到机核私信 YQBelmont贲 告知一声，感谢。";
 const RESULT_LIMIT_STORAGE_KEY = "gsearch.resultLimit";
 const AUTO_EXPAND_STORAGE_KEY = "gsearch.autoExpandDetails";
 const DEFAULT_RESULT_LIMIT = 50;
@@ -19,6 +20,7 @@ const OPEN_SOURCE_REPO_URL = "https://github.com/jlmaoju/g-search";
 const state = {
   runtimeConfig: {
     apiBase: "",
+    imageProxyBase: "",
     downloadUrl: "",
     offlineMessage: "静态页面已经打开，但现在无法连接搜索后端。",
   },
@@ -54,6 +56,9 @@ const ABOUT_PANEL_LABELS = {
 };
 
 const els = {
+  pageShell: document.querySelector(".page-shell"),
+  sheetPanel: document.querySelector(".sheet-panel"),
+  resultsPanel: document.getElementById("results-panel"),
   modePill: document.getElementById("mode-pill"),
   utilityButton: document.getElementById("utility-button"),
   settingsButton: document.getElementById("settings-button"),
@@ -101,6 +106,9 @@ const els = {
 };
 
 let backendToastTimer = 0;
+let searchRequestId = 0;
+let searchController = null;
+let sheetReturnFocus = null;
 const PROGRAM_TYPE_LABEL_OVERRIDES = new Map([["会员专享", "会员专享（免费部分）"]]);
 
 function clampInteger(value, { min, max, fallback }) {
@@ -144,6 +152,17 @@ function apiUrl(path) {
 
 function proxiedMediaAsset(url) {
   if (!url) return "";
+  if (state.runtimeConfig.imageProxyBase) {
+    try {
+      const asset = new URL(url);
+      if (["https:", "http:"].includes(asset.protocol) && asset.hostname === "image.gcores.com"
+          && !asset.username && !asset.password && !asset.port) {
+        return `${state.runtimeConfig.imageProxyBase.replace(/\/$/, "")}${asset.pathname}${asset.search}`;
+      }
+    } catch {
+      // Let the existing media API validate unsupported or malformed URLs.
+    }
+  }
   return `${apiUrl("/api/media-asset")}?url=${encodeURIComponent(url)}`;
 }
 
@@ -393,6 +412,7 @@ function toggleResultContext(docId) {
     state.expandedResultDocIds.add(docId);
   }
   renderResults();
+  Array.from(els.results.querySelectorAll("[data-toggle-context]")).find((button) => button.dataset.toggleContext === docId)?.focus();
 }
 
 function renderMeta(meta) {
@@ -635,10 +655,12 @@ function setFilterTab(tab) {
     const isActive = button.dataset.filterTab === resolved;
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-selected", String(isActive));
+    button.tabIndex = isActive ? 0 : -1;
   });
   els.filterDropdown?.querySelectorAll("[data-filter-panel]").forEach((panel) => {
     const isActive = panel.dataset.filterPanel === resolved;
     panel.classList.toggle("is-active", isActive);
+    panel.classList.toggle("hidden", !isActive);
   });
 }
 
@@ -657,13 +679,19 @@ function renderOffline(errorText) {
 function setSearchAvailability(isAvailable) {
   state.online = isAvailable;
   els.searchSubmit.classList.toggle("is-unavailable", !isAvailable);
-  els.searchSubmit.setAttribute("aria-disabled", String(!isAvailable));
-  els.searchSubmit.title = isAvailable ? "" : BACKEND_MAINTENANCE_MESSAGE;
+  // Search remains an actionable retry even when a previous request failed.
+  els.searchSubmit.removeAttribute("aria-disabled");
+  els.searchSubmit.title = isAvailable ? "" : "点击搜索可重试连接";
+  if (isAvailable) {
+    els.offlineNotice.classList.add("hidden");
+    hideBackendToast();
+  }
 }
 
 function hideBackendToast() {
   window.clearTimeout(backendToastTimer);
   els.backendToast.classList.remove("is-visible");
+  els.backendToast.textContent = "";
 }
 
 function showBackendToast({ autoHide = true } = {}) {
@@ -672,7 +700,7 @@ function showBackendToast({ autoHide = true } = {}) {
   window.clearTimeout(backendToastTimer);
   if (autoHide) {
     backendToastTimer = window.setTimeout(() => {
-      els.backendToast.classList.remove("is-visible");
+      hideBackendToast();
     }, 2600);
   }
 }
@@ -692,21 +720,28 @@ function shouldEnterMaintenanceMode(error, statusCode) {
 function setScope(scope) {
   state.scope = scope;
   els.scopeSwitch.querySelectorAll(".scope-chip").forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.scope === scope);
+    const active = button.dataset.scope === scope;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
   });
+  els.resultsPanel.setAttribute("aria-labelledby", `scope-${scope}`);
 }
 
 function openFilterDropdown() {
   state.filterDropdownOpen = true;
   els.filterDropdown.classList.remove("hidden");
   els.filterButton.classList.add("is-open");
+  els.filterButton.setAttribute("aria-expanded", "true");
   setFilterTab(state.activeFilterTab);
 }
 
-function closeFilterDropdown() {
+function closeFilterDropdown({ restoreFocus = false } = {}) {
   state.filterDropdownOpen = false;
   els.filterDropdown.classList.add("hidden");
   els.filterButton.classList.remove("is-open");
+  els.filterButton.setAttribute("aria-expanded", "false");
+  if (restoreFocus) els.filterButton.focus();
 }
 
 function toggleFilterDropdown() {
@@ -718,6 +753,8 @@ function toggleFilterDropdown() {
 }
 
 function openSheet(kind) {
+  if (!state.activeSheet) sheetReturnFocus = document.activeElement;
+  closeFilterDropdown();
   state.activeSheet = kind;
   els.sheetRoot.classList.remove("hidden");
   els.sheetRoot.setAttribute("aria-hidden", "false");
@@ -731,12 +768,40 @@ function openSheet(kind) {
     els.sheetKicker.textContent = "关于本库";
     els.sheetTitle.textContent = "当前索引";
   }
+  els.pageShell.inert = true;
+  els.sheetClose.focus();
 }
 
 function closeSheet() {
   state.activeSheet = null;
   els.sheetRoot.classList.add("hidden");
   els.sheetRoot.setAttribute("aria-hidden", "true");
+  els.pageShell.inert = false;
+  if (sheetReturnFocus?.isConnected) sheetReturnFocus.focus();
+  sheetReturnFocus = null;
+}
+
+function handleTabKeys(event, container, activate) {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  const tabs = Array.from(container.querySelectorAll('[role="tab"]'));
+  const index = tabs.indexOf(event.target);
+  if (index < 0) return;
+  event.preventDefault();
+  const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+    : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+  tabs[next].focus();
+  activate(tabs[next]);
+}
+
+function trapSheetFocus(event) {
+  if (event.key !== "Tab" || !state.activeSheet) return;
+  const controls = Array.from(els.sheetPanel.querySelectorAll('button, a[href], input, select, textarea, [tabindex]'))
+    .filter((el) => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length > 0);
+  const index = controls.indexOf(document.activeElement);
+  if (controls.length && (index < 0 || (event.shiftKey && index === 0) || (!event.shiftKey && index === controls.length - 1))) {
+    event.preventDefault();
+    controls[event.shiftKey ? controls.length - 1 : 0].focus();
+  }
 }
 
 function emptyResultMessage() {
@@ -789,7 +854,7 @@ function renderResultCard(result) {
           ${result.match_summary ? `<p class="result-summary-text${isSemanticHit ? " is-semantic-hit" : ""}">${escapeHtml(result.match_summary)}</p>` : ""}
           ${isExpanded ? renderContextPanel(result, contentText) : ""}
           <div class="result-actions">
-            ${canExpand ? `<button type="button" class="inline-button" data-toggle-context="${escapeHtml(result.doc_id)}">${isExpanded ? "收起上下文" : "展开更多上下文"}</button>` : ""}
+            ${canExpand ? `<button type="button" class="inline-button" data-toggle-context="${escapeHtml(result.doc_id)}" aria-expanded="${isExpanded}">${isExpanded ? "收起上下文" : "展开更多上下文"}</button>` : ""}
             ${isTimeline && result.timeline_quote_href ? `<a class="text-link" href="${escapeHtml(result.timeline_quote_href)}" target="_blank" rel="noopener noreferrer">查看相关链接</a>` : ""}
             ${result.source_url ? `<a class="text-link" href="${escapeHtml(result.source_url)}" target="_blank" rel="noopener noreferrer">打开原页</a>` : ""}
           </div>
@@ -823,10 +888,15 @@ function isDegradedPayload(payload) {
   return Boolean(payload && (payload.degraded || payload.recall_stats?.lexical_fallback));
 }
 
+function isEmbeddingQuotaExhaustedPayload(payload) {
+  if (payload?.degraded_reason === "embedding_quota_exhausted") return true;
+  return /1113|余额不足|资源包/.test(String(payload?.semantic_error || ""));
+}
+
 function degradedSearchMessage(payload) {
   if (payload?.degraded_message) return String(payload.degraded_message);
   const semanticError = String(payload?.semantic_error || "");
-  if (/1113|余额不足|资源包/.test(semanticError)) {
+  if (isEmbeddingQuotaExhaustedPayload(payload)) {
     return "语义检索额度不足，当前显示的是关键词降级结果，相关性和排序质量会明显下降。";
   }
   if (/timed out|timeout/i.test(semanticError)) {
@@ -837,13 +907,21 @@ function degradedSearchMessage(payload) {
 
 function renderDegradedNotice(payload) {
   if (!isDegradedPayload(payload)) return "";
+  const quotaExhausted = isEmbeddingQuotaExhaustedPayload(payload);
   const message = degradedSearchMessage(payload);
-  const detail = payload?.degraded_detail || "本次没有使用向量语义召回，只使用本地关键词索引进行降级检索。";
+  const detail = payload?.degraded_detail || (quotaExhausted
+    ? QUOTA_REPORT_MESSAGE
+    : "本次没有使用向量语义召回，只使用本地关键词索引进行降级检索。");
+  const modifier = quotaExhausted ? " degraded-notice--quota" : "";
+  const badge = quotaExhausted ? "额度告警" : "降级检索";
+  const title = quotaExhausted
+    ? "后台语义检索额度已用尽。"
+    : "当前结果已降级，不是完整语义检索结果。";
   return `
-    <section class="degraded-notice" role="alert" aria-live="assertive">
-      <div class="degraded-notice-badge">降级检索</div>
+    <section class="degraded-notice${modifier}" role="alert" aria-live="assertive">
+      <div class="degraded-notice-badge">${badge}</div>
       <div>
-        <strong>当前结果已降级，不是完整语义检索结果。</strong>
+        <strong>${title}</strong>
         <p>${escapeHtml(message)}</p>
         <p class="degraded-notice-detail">${escapeHtml(detail)}</p>
       </div>
@@ -869,29 +947,54 @@ function updateStatusFromPayload(payload) {
 
 async function loadRuntimeConfig() {
   try {
-    const response = await fetch("./assets/runtime-config.json", { cache: "no-store" });
+    const { response, payload } = await fetchJsonWithTimeout("./assets/runtime-config.json?v=20260906-images");
     if (!response.ok) return;
-    const payload = await response.json();
     state.runtimeConfig = { ...state.runtimeConfig, ...payload };
   } catch {
     // keep defaults
   }
 }
 
-async function loadMetaAndParticipants() {
-  const metaResponse = await fetch(apiUrl("/api/meta"), { cache: "no-store" });
-  if (!metaResponse.ok) {
-    throw new Error(`meta HTTP ${metaResponse.status}`);
+async function fetchJsonWithTimeout(url, { signal, timeoutMs = 10000 } = {}) {
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  if (signal?.aborted) cancel();
+  signal?.addEventListener("abort", cancel, { once: true });
+  let timedOut = false;
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+    const rawText = await response.text();
+    let payload;
+    try {
+      payload = rawText ? JSON.parse(rawText) : {};
+    } catch {
+      if (response.ok) throw new Error("服务返回了无效响应，请重试。");
+      payload = { error: `请求失败 (${response.status})` };
+    }
+    return { response, payload };
+  } catch (error) {
+    if (timedOut) throw new Error("请求超时，请再次点击搜索重试。");
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+    signal?.removeEventListener("abort", cancel);
   }
-  const metaPayload = await metaResponse.json();
-  renderMeta(metaPayload);
+}
 
-  const participantsResponse = await fetch(apiUrl("/api/participants"), { cache: "no-store" });
-  if (!participantsResponse.ok) {
-    throw new Error(`participants HTTP ${participantsResponse.status}`);
+async function loadMetaAndParticipants() {
+  const [meta, participants] = await Promise.all([
+    fetchJsonWithTimeout(apiUrl("/api/meta")),
+    fetchJsonWithTimeout(apiUrl("/api/participants")),
+  ]);
+  if (!meta.response.ok || !participants.response.ok) {
+    throw new Error("无法读取搜索服务信息");
   }
-  const participantsPayload = await participantsResponse.json();
-  renderFilters(participantsPayload);
+  renderMeta(meta.payload);
+  renderFilters(participants.payload);
 }
 
 function buildSearchParams(query) {
@@ -927,26 +1030,29 @@ function searchErrorMessage(payload, statusCode) {
 
 async function runSearch(event) {
   if (event) event.preventDefault();
-  if (!state.online) {
-    showBackendToast();
-    els.statusLine.textContent = BACKEND_MAINTENANCE_MESSAGE;
+  const requestId = ++searchRequestId;
+  searchController?.abort();
+  searchController = null;
+  const query = els.query.value.trim();
+  if (!query) {
+    els.searchForm.removeAttribute("aria-busy");
+    els.results.removeAttribute("aria-busy");
+    els.statusLine.textContent = "请输入节目名称或记忆线索。";
     return;
   }
-  const query = els.query.value.trim();
-  if (!query) return;
-  els.statusLine.textContent = "正在搜索...";
+  const controller = new AbortController();
+  searchController = controller;
+  const refreshMetadata = !state.online || !state.meta;
+  els.statusLine.textContent = state.online ? "正在搜索..." : "正在重新连接并搜索...";
+  els.searchForm.setAttribute("aria-busy", "true");
+  els.results.setAttribute("aria-busy", "true");
   const params = buildSearchParams(query);
   try {
-    const response = await fetch(`${apiUrl("/api/search")}?${params.toString()}`, { cache: "no-store" });
-    const rawText = await response.text();
-    let payload = {};
-    if (rawText) {
-      try {
-        payload = JSON.parse(rawText);
-      } catch {
-        payload = { error: rawText };
-      }
-    }
+    const { response, payload } = await fetchJsonWithTimeout(`${apiUrl("/api/search")}?${params.toString()}`, {
+      signal: controller.signal,
+      timeoutMs: 30000,
+    });
+    if (requestId !== searchRequestId || controller.signal.aborted) return;
     if (!response.ok) {
       const message = searchErrorMessage(payload, response.status);
       els.statusLine.textContent = message;
@@ -955,6 +1061,8 @@ async function runSearch(event) {
       }
       return;
     }
+    if (!Array.isArray(payload.results)) throw new Error("搜索结果格式无效，请重试。");
+    setSearchAvailability(true);
     state.lastPayload = payload;
     state.results = payload.results || [];
     state.relevanceOrderedResults = [...state.results];
@@ -962,12 +1070,20 @@ async function runSearch(event) {
     clearResultExpansionState();
     updateStatusFromPayload(payload);
     renderResults();
+    if (refreshMetadata) loadMetaAndParticipants().catch(() => {});
   } catch (error) {
+    if (requestId !== searchRequestId || controller.signal.aborted) return;
     if (shouldEnterMaintenanceMode(error)) {
       markBackendUnavailable();
       return;
     }
     els.statusLine.textContent = error instanceof Error ? error.message : String(error);
+  } finally {
+    if (requestId === searchRequestId) {
+      searchController = null;
+      els.searchForm.removeAttribute("aria-busy");
+      els.results.removeAttribute("aria-busy");
+    }
   }
 }
 
@@ -1035,12 +1151,16 @@ function removeSelectedFilter(kind, value) {
 function handleProgramTypeToggle(target) {
   const name = target.value;
   if (!name) return;
+  const restoreFocus = document.activeElement === target;
   if (target.checked) {
     state.selectedProgramTypes.add(name);
   } else {
     state.selectedProgramTypes.delete(name);
   }
   renderProgramTypeList();
+  if (restoreFocus) {
+    [...els.programTypeList.querySelectorAll('input[name="categories"]')].find((input) => input.value === name)?.focus();
+  }
   renderFilterSummary();
   renderActiveFilters();
   renderFilterTriggerState();
@@ -1052,12 +1172,16 @@ function handleProgramTypeToggle(target) {
 function handleParticipantToggle(target) {
   const name = target.value;
   if (!name) return;
+  const restoreFocus = document.activeElement === target;
   if (target.checked) {
     state.selectedParticipants.add(name);
   } else {
     state.selectedParticipants.delete(name);
   }
   renderParticipantList();
+  if (restoreFocus) {
+    [...els.participantList.querySelectorAll('input[name="participants"]')].find((input) => input.value === name)?.focus();
+  }
   renderFilterSummary();
   renderActiveFilters();
   renderFilterTriggerState();
@@ -1094,17 +1218,16 @@ function bindEvents() {
       showBackendToast();
     }
   });
-  els.searchSubmit.addEventListener("click", (event) => {
-    if (!state.online) {
-      event.preventDefault();
-      showBackendToast();
-    }
+  els.query.addEventListener("input", () => {
+    if (!els.query.value.trim() && searchController) runSearch();
   });
   els.scopeSwitch.addEventListener("click", (event) => {
     const button = event.target.closest("[data-scope]");
     if (!button) return;
     handleScopeClick(button);
   });
+  els.scopeSwitch.addEventListener("keydown", (event) => handleTabKeys(event, els.scopeSwitch, handleScopeClick));
+  els.filterTabs.addEventListener("keydown", (event) => handleTabKeys(event, els.filterTabs, (button) => setFilterTab(button.dataset.filterTab)));
   els.filterButton.addEventListener("click", (event) => {
     event.stopPropagation();
     toggleFilterDropdown();
@@ -1168,12 +1291,15 @@ function bindEvents() {
   els.viewerKeyForm.addEventListener("submit", saveViewerKey);
   els.viewerClearKey.addEventListener("click", clearViewerKey);
   document.addEventListener("keydown", (event) => {
+    trapSheetFocus(event);
     if (event.key === "Escape" && state.activeSheet) {
+      event.preventDefault();
       closeSheet();
       return;
     }
     if (event.key === "Escape" && state.filterDropdownOpen) {
-      closeFilterDropdown();
+      event.preventDefault();
+      closeFilterDropdown({ restoreFocus: true });
     }
   });
   document.addEventListener("click", (event) => {
@@ -1189,12 +1315,14 @@ async function bootstrap() {
   setScope(state.scope);
   renderSearchSettingsControls();
   await loadRuntimeConfig();
+  const startupRequestId = searchRequestId;
   try {
     await loadMetaAndParticipants();
   } catch (error) {
-    console.error("Failed to load search backend", error);
-    renderOffline(BACKEND_MAINTENANCE_MESSAGE);
-    els.statusLine.textContent = BACKEND_MAINTENANCE_MESSAGE;
+    if (startupRequestId === searchRequestId) {
+      renderOffline(BACKEND_MAINTENANCE_MESSAGE);
+      els.statusLine.textContent = BACKEND_MAINTENANCE_MESSAGE;
+    }
   }
 }
 

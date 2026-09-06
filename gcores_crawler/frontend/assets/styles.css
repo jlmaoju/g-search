@@ -577,6 +577,14 @@ input {
   color: var(--ink);
 }
 
+.degraded-notice--quota {
+  border-color: rgba(255, 103, 68, 0.98);
+  background:
+    linear-gradient(135deg, rgba(255, 70, 46, 0.28), rgba(255, 186, 47, 0.16)),
+    rgba(45, 16, 10, 0.94);
+  box-shadow: 0 0 0 1px rgba(255, 103, 68, 0.3), 0 16px 34px rgba(0, 0, 0, 0.32);
+}
+
 .degraded-notice-badge {
   padding: 6px 10px;
   border-radius: 999px;
@@ -585,6 +593,11 @@ input {
   font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.06em;
+}
+
+.degraded-notice--quota .degraded-notice-badge {
+  background: #ff6744;
+  color: #240800;
 }
 
 .degraded-notice strong {
@@ -601,6 +614,12 @@ input {
 .degraded-notice-detail {
   color: rgba(255, 247, 220, 0.78);
   font-size: 13px;
+}
+
+.degraded-notice--quota .degraded-notice-detail {
+  color: #ffd5c9;
+  font-size: 14px;
+  font-weight: 800;
 }
 
 .result-card {

@@ -201,7 +201,7 @@ def export_viewer_bundle(
     ui_meta = build_search_ui_meta_snapshot(
         root=root,
         collection_name=collection_name,
-        participants_limit=160,
+        participants_limit=None,
     )
     (bundle_root / "reports").mkdir(parents=True, exist_ok=True)
     (bundle_root / "reports" / "search_ui_meta.json").write_text(

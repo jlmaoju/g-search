@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 from typing import Optional
 from urllib.parse import urlparse
-from urllib.request import Request as UrlRequest, urlopen
+from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_opener
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -47,6 +47,47 @@ def _resolve_default_frontend_dir() -> Path:
 
 DEFAULT_SITE_TITLE = "机核电台记忆检索"
 DEFAULT_SITE_SUBTITLE = "一句话找回那期节目"
+MAX_MEDIA_ASSET_BYTES = 20 * 1024 * 1024
+
+
+def validate_media_asset_url(url: str) -> None:
+    try:
+        parsed = urlparse(url)
+        hostname = (parsed.hostname or "").lower()
+        port = parsed.port
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid asset url") from exc
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=400, detail="unsupported asset url")
+    if hostname != "gcores.com" and not hostname.endswith(".gcores.com"):
+        raise HTTPException(status_code=400, detail="unsupported asset host")
+    if parsed.username is not None or parsed.password is not None or port not in {None, 80, 443}:
+        raise HTTPException(status_code=400, detail="unsupported asset authority")
+
+
+class MediaAssetRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        validate_media_asset_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def fetch_media_asset_bytes(url: str) -> tuple[bytes, str]:
+    """Blocking transport; callers must run this outside the ASGI event loop."""
+    validate_media_asset_url(url)
+    req = UrlRequest(url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.gcores.com/"})
+    try:
+        with build_opener(MediaAssetRedirectHandler()).open(req, timeout=20) as resp:
+            content_type = resp.headers.get_content_type()
+            if not content_type.startswith("image/"):
+                raise HTTPException(status_code=415, detail="asset is not an image")
+            content = resp.read(MAX_MEDIA_ASSET_BYTES + 1)
+            if len(content) > MAX_MEDIA_ASSET_BYTES:
+                raise HTTPException(status_code=413, detail="asset is too large")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="asset fetch failed") from exc
+    return content, content_type
 
 
 def _create_search_audit_logger(root: str) -> logging.Logger:
@@ -342,14 +383,16 @@ def create_search_app(
 
     @app.get("/api/episodes/{item_id}", response_class=JSONResponse)
     async def episode(request: Request, item_id: str) -> JSONResponse:
-        payload = request.app.state.runtime.episode_details(item_id)
+        payload = await run_in_threadpool(request.app.state.runtime.episode_details, item_id)
         return JSONResponse(payload)
 
     @app.get("/api/participants", response_class=JSONResponse)
     async def participant_list(request: Request) -> JSONResponse:
-        meta_snapshot = _collect_cached_meta_snapshot(request)
-        participants = meta_snapshot.get("participants") or request.app.state.catalog.list_radio_participants(limit=160)
-        program_types = meta_snapshot.get("program_types") or request.app.state.catalog.list_radio_categories(limit=None)
+        meta_snapshot = await run_in_threadpool(_collect_cached_meta_snapshot, request)
+        participants = meta_snapshot.get("participants") or []
+        if not participants or len(participants) < int(meta_snapshot.get("participants_count") or 0):
+            participants = await run_in_threadpool(request.app.state.catalog.list_radio_participants, limit=None)
+        program_types = meta_snapshot.get("program_types") or await run_in_threadpool(request.app.state.catalog.list_radio_categories, limit=None)
         return JSONResponse({"participants": participants, "program_types": program_types})
 
     @app.get("/api/meta", response_class=JSONResponse)
@@ -357,7 +400,7 @@ def create_search_app(
         viewer_payload = None
         if request.app.state.viewer_state is not None:
             viewer_payload = request.app.state.viewer_state.status_payload()
-        live_meta = _collect_cached_meta_snapshot(request)
+        live_meta = await run_in_threadpool(_collect_cached_meta_snapshot, request)
         return JSONResponse(
             {
                 "mode": request.app.state.mode,
@@ -383,7 +426,7 @@ def create_search_app(
     @app.get("/api/health", response_class=JSONResponse)
     async def health(request: Request) -> JSONResponse:
         try:
-            collection_exists = request.app.state.qdrant.collection_exists()
+            collection_exists = await run_in_threadpool(request.app.state.qdrant.collection_exists)
             payload = {
                 "status": "ok" if collection_exists else "degraded",
                 "mode": request.app.state.mode,
@@ -404,29 +447,11 @@ def create_search_app(
             )
 
     async def fetch_media_asset(url: str) -> Response:
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"}:
-            raise HTTPException(status_code=400, detail="unsupported asset url")
-        hostname = (parsed.hostname or "").lower()
-        if not hostname.endswith("gcores.com"):
-            raise HTTPException(status_code=400, detail="unsupported asset host")
-        req = UrlRequest(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0",
-                "Referer": "https://www.gcores.com/",
-            },
-        )
-        try:
-            with urlopen(req, timeout=20) as resp:
-                content = resp.read()
-                content_type = resp.headers.get_content_type() or "application/octet-stream"
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"asset fetch failed: {exc}") from exc
+        content, content_type = await run_in_threadpool(fetch_media_asset_bytes, url)
         return Response(
             content=content,
             media_type=content_type,
-            headers={"Cache-Control": "public, max-age=86400"},
+            headers={"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff"},
         )
 
     @app.get("/api/timeline-asset")

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>机核电台记忆搜索</title>
-  <link rel="stylesheet" href="./assets/styles.css" />
+  <link rel="stylesheet" href="./assets/styles.css?v=20260815-quota-alert" />
 </head>
 <body>
   <div class="page-shell">
@@ -37,21 +37,22 @@
 
         <div class="search-toolbar">
           <div class="scope-switch" id="scope-switch" role="tablist" aria-label="搜索范围">
-            <button type="button" class="scope-chip is-active" data-scope="content">内容</button>
-            <button type="button" class="scope-chip" data-scope="title">标题</button>
-            <button type="button" class="scope-chip" data-scope="timeline">时间轴</button>
+            <button type="button" class="scope-chip is-active" data-scope="content" id="scope-content" role="tab" aria-selected="true" aria-controls="results-panel">内容</button>
+            <button type="button" class="scope-chip" data-scope="title" id="scope-title" role="tab" aria-selected="false" aria-controls="results-panel" tabindex="-1">标题</button>
+            <button type="button" class="scope-chip" data-scope="timeline" id="scope-timeline" role="tab" aria-selected="false" aria-controls="results-panel" tabindex="-1">时间轴</button>
           </div>
         </div>
 
         <form class="search-form" id="search-form">
-          <label class="search-box" for="query">
+          <div class="search-box">
             <input
               id="query"
               type="search"
+              aria-label="搜索节目或记忆线索"
               autocomplete="off"
               placeholder="比如：好像聊过涨价和行业压力的那期"
             />
-            <button type="button" class="filter-trigger" id="filter-button" aria-label="筛选条件" title="筛选条件">
+            <button type="button" class="filter-trigger" id="filter-button" aria-label="筛选条件" title="筛选条件" aria-expanded="false" aria-controls="filter-dropdown">
               <span class="filter-bars" aria-hidden="true">
                 <span></span>
                 <span></span>
@@ -110,7 +111,7 @@
                     <strong>参与者</strong>
                   </div>
                   <label class="participant-search-field" for="participant-search">
-                    <input id="participant-search" type="search" autocomplete="off" placeholder="搜索参与者" />
+                    <input id="participant-search" type="search" autocomplete="off" placeholder="搜索参与者" aria-label="搜索参与者" />
                   </label>
                   <div class="participant-list" id="participant-list"></div>
                 </section>
@@ -119,17 +120,17 @@
                 <p id="filter-summary-text">暂未筛选节目类型和参与者。</p>
               </div>
             </div>
-          </label>
+          </div>
           <button type="submit" class="search-button" id="search-submit">搜索</button>
         </form>
 
         <div class="active-filters hidden" id="active-filters"></div>
       </section>
 
-      <section class="results-section">
+      <section class="results-section" id="results-panel" role="tabpanel" aria-labelledby="scope-content">
         <div class="results-head">
           <h2 class="results-title">搜索结果</h2>
-          <div class="results-status" id="status-line">从一段记忆开始搜索。</div>
+          <div class="results-status" id="status-line" role="status" aria-live="polite" aria-atomic="true">从一段记忆开始搜索。</div>
           <button type="button" class="mini-button result-sort-button hidden" id="result-sort-time">将当前结果按时间顺序排列</button>
         </div>
         <div class="empty-state" id="empty-state"></div>
@@ -191,6 +192,6 @@
 
   <div class="backend-toast" id="backend-toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
-  <script type="module" src="./assets/app.js?v=20260506-repo-link"></script>
+  <script type="module" src="./assets/app.js?v=20260906-images"></script>
 </body>
 </html>

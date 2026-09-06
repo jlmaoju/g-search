@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import RLock
 from typing import Any, Iterable, List, Optional, Sequence
 
 from ..catalog import Catalog, normalize_search_collection_name, use_legacy_search_documents
@@ -25,9 +28,46 @@ class QueryCatalog:
         self.root = root
         self.root_path = Path(root)
         self._catalog = catalog or Catalog(root)
-        self._normalized_cache: dict[str, Optional[dict[str, Any]]] = {}
-        self._item_display_cache: dict[str, Optional[dict[str, Any]]] = {}
-        self._json_cache: dict[str, tuple[int, Optional[dict[str, Any]]]] = {}
+        self._cache: OrderedDict[tuple[str, ...], tuple[float, object, Any]] = OrderedDict()
+        self._cache_lock = RLock()
+        self._cache_capacity = 512
+        self._cache_ttl_seconds = 30.0
+
+    @staticmethod
+    def _file_revision(path: Path) -> Optional[tuple[int, int]]:
+        try:
+            stat = path.stat()
+            return stat.st_mtime_ns, stat.st_size
+        except OSError:
+            return None
+
+    def _data_revision(self) -> tuple:
+        return (
+            self._file_revision(self.db_path),
+            self._file_revision(self.db_path.with_name(self.db_path.name + "-wal")),
+            self._file_revision(self.root_path / "reports" / "search_ui_meta.json"),
+        )
+
+    def _cached(self, key: tuple[str, ...], revision: object) -> Any:
+        with self._cache_lock:
+            entry = self._cache.get(key)
+            if entry is not None:
+                expires_at, cached_revision, value = entry
+                if time.monotonic() < expires_at and cached_revision == revision:
+                    self._cache.move_to_end(key)
+                    return value
+                self._cache.pop(key, None)
+        return None
+
+    def _remember(self, key: tuple[str, ...], revision: object, value: Any) -> None:
+        # Missing/invalid files and absent items may appear during the next sync.
+        if value is None:
+            return
+        with self._cache_lock:
+            self._cache[key] = (time.monotonic() + self._cache_ttl_seconds, revision, value)
+            self._cache.move_to_end(key)
+            while len(self._cache) > self._cache_capacity:
+                self._cache.popitem(last=False)
 
     @property
     def raw(self) -> Catalog:
@@ -46,21 +86,20 @@ class QueryCatalog:
         return self._load_cached_json(snapshot_path, cache_key="search_ui_meta")
 
     def _load_cached_json(self, path: Path, *, cache_key: str) -> Optional[dict[str, Any]]:
-        if not path.exists():
-            self._json_cache.pop(cache_key, None)
+        revision = self._file_revision(path)
+        if revision is None:
             return None
-        try:
-            stat = path.stat()
-        except OSError:
-            return None
-        cached = self._json_cache.get(cache_key)
-        if cached and cached[0] == stat.st_mtime_ns:
-            return cached[1]
+        key = ("json", cache_key)
+        cached = self._cached(key, revision)
+        if cached is not None:
+            return cached
         try:
             payload = json.loads(path.read_text(encoding="utf-8-sig"))
         except Exception:
             payload = None
-        self._json_cache[cache_key] = (stat.st_mtime_ns, payload)
+        if not isinstance(payload, dict):
+            return None
+        self._remember(key, revision, payload)
         return payload
 
     def resolve_library_updated_at(self, manifest: Optional[dict] = None) -> Optional[str]:
@@ -96,29 +135,37 @@ class QueryCatalog:
         normalized_key = str(normalized_relpath or "").strip()
         if not normalized_key:
             return None
-        if normalized_key in self._normalized_cache:
-            return self._normalized_cache[normalized_key]
         normalized_path = self.root_path / normalized_key
-        if not normalized_path.exists():
-            self._normalized_cache[normalized_key] = None
+        revision = self._file_revision(normalized_path)
+        if revision is None:
             return None
+        key = ("normalized", normalized_key)
+        cached = self._cached(key, revision)
+        if cached is not None:
+            return cached
         try:
             payload = json.loads(normalized_path.read_text(encoding="utf-8-sig"))
         except Exception:
             payload = None
-        self._normalized_cache[normalized_key] = payload
+        if not isinstance(payload, dict):
+            return None
+        self._remember(key, revision, payload)
         return payload
 
     def get_item_display_record(self, *, item_key: str) -> Optional[dict[str, Any]]:
         cache_key = str(item_key or "").strip()
         if not cache_key:
             return None
-        if cache_key in self._item_display_cache:
-            return self._item_display_cache[cache_key]
+        revision = self._data_revision()
+        key = ("display", cache_key)
+        cached = self._cached(key, revision)
+        if cached is not None:
+            normalized_path = str(cached.get("normalized_path") or "")
+            if cached.get("_normalized_revision") == self._file_revision(self.root_path / normalized_path):
+                return {k: v for k, v in cached.items() if k != "_normalized_revision"}
 
         item_row = self.get_item_record(item_key=cache_key)
         if item_row is None:
-            self._item_display_cache[cache_key] = None
             return None
 
         tags: list[str]
@@ -163,17 +210,24 @@ class QueryCatalog:
                     "content_text": normalized.get("content_text"),
                 }
             )
-        self._item_display_cache[cache_key] = merged
+        normalized_revision = self._file_revision(self.root_path / str(item_row.get("normalized_path") or ""))
+        self._remember(key, revision, {**merged, "_normalized_revision": normalized_revision})
         return merged
 
     def get_item_record(self, *, item_key: str) -> Optional[dict]:
         return self._catalog.get_item_record(item_key=item_key)
 
     def list_radio_participants(self, *, limit: Optional[int] = None) -> List[dict]:
-        return self._catalog.list_radio_participants(limit=limit)
+        revision = self._data_revision()
+        key = ("participants",)
+        participants = self._cached(key, revision)
+        if participants is None:
+            participants = self._catalog.list_radio_participants(limit=None)
+            self._remember(key, revision, participants)
+        return participants[:limit] if limit is not None else participants
 
     def count_radio_participants(self) -> int:
-        return len(self._catalog.list_radio_participants(limit=None))
+        return len(self.list_radio_participants(limit=None))
 
     def list_radio_categories(self, *, limit: Optional[int] = None) -> List[dict]:
         return self._catalog.list_radio_categories(limit=limit)
@@ -217,6 +271,8 @@ class QueryCatalog:
         participants: Optional[Iterable[str]] = None,
         limit: int = 200,
     ) -> List[dict]:
+        if limit <= 0:
+            return []
         terms: list[str] = []
         for value in query_terms:
             term = str(value or "").strip()
@@ -241,6 +297,17 @@ class QueryCatalog:
             clauses.append(f"doc_type IN ({', '.join('?' for _ in doc_type_list)})")
             params.extend(doc_type_list)
 
+        # Filter the complete candidate set before ORDER BY / LIMIT, including
+        # legacy collections. Invalid payloads behave like an empty object.
+        payload_expr = "CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END"
+        category_values = sorted({str(value).strip() for value in (categories or []) if str(value).strip()})
+        if category_values:
+            clauses.append(f"json_extract({payload_expr}, '$.category') IN ({', '.join('?' for _ in category_values)})")
+            params.extend(category_values)
+        for participant in dict.fromkeys(str(value).strip() for value in (participants or []) if str(value).strip()):
+            clauses.append(f"EXISTS (SELECT 1 FROM json_each({payload_expr}, '$.users') AS participant WHERE participant.value = ?)")
+            params.append(participant)
+
         search_expr = (
             "COALESCE(title, '') || ' ' || "
             "COALESCE(item_title, '') || ' ' || "
@@ -260,7 +327,7 @@ class QueryCatalog:
             like_params.append(pattern)
         clauses.append(f"({' OR '.join(like_clauses)})")
 
-        sql_limit = max(100, min(5000, int(limit or 200) * 8))
+        sql_limit = int(limit)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         query = f"""
             SELECT *, ({' + '.join(score_parts)}) AS lexical_score
@@ -272,17 +339,9 @@ class QueryCatalog:
         with self._catalog._connect() as connection:
             rows = connection.execute(query, [*score_params, *params, *like_params, sql_limit]).fetchall()
 
-        category_values = {str(value).strip() for value in (categories or []) if str(value).strip()}
-        participant_values = [str(value).strip() for value in (participants or []) if str(value).strip()]
         results: list[dict] = []
         for row in rows:
             payload = parse_payload_json(row["payload_json"])
-            if category_values and str(payload.get("category") or "") not in category_values:
-                continue
-            if participant_values:
-                users = {str(value) for value in (payload.get("users") or [])}
-                if any(value not in users for value in participant_values):
-                    continue
             item = dict(row)
             item["_payload"] = payload
             results.append(item)

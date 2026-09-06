@@ -117,11 +117,18 @@ def update_run_state(
     current_step_label: str | None = None,
     message: str | None = None,
     note: str | None = None,
+    new_run: bool = False,
 ) -> dict[str, Any]:
     with RuntimeFileLock(path):
         payload = load_runtime(path)
         now = utc_now_iso()
         previous_status = str(payload.get("status") or "")
+        starting_run = status == "running" and (new_run or previous_status != "running")
+        if starting_run:
+            payload["run_id"] = uuid.uuid4().hex
+            payload["steps"] = []
+            for key in ("current_step_key", "current_step_index", "current_step_label", "message"):
+                payload.pop(key, None)
         if run_label is not None:
             payload["run_label"] = run_label
         if total_steps is not None:
@@ -129,7 +136,7 @@ def update_run_state(
         if status is not None:
             payload["status"] = status
             if status == "running":
-                if previous_status != "running":
+                if starting_run:
                     payload["started_at"] = now
                 payload.pop("finished_at", None)
                 payload.pop("note", None)
@@ -168,6 +175,9 @@ def update_step_state(
         step = _find_step(payload, step_key)
         now = utc_now_iso()
         previous_status = str(step.get("status") or "")
+        if (status == "running" and previous_status != "running") or status == "skipped":
+            for key in ("started_at", "finished_at", "progress", "details"):
+                step.pop(key, None)
         if step_index is not None:
             step["index"] = int(step_index)
         if step_label is not None:
@@ -191,7 +201,10 @@ def update_step_state(
             progress["message"] = message
         current_value = progress.get("current")
         total_value = progress.get("total")
-        if isinstance(current_value, int) and isinstance(total_value, int) and total_value > 0:
+        if step.get("status") == "completed":
+            # The phase is finished; keep the actual processed counts for auditing.
+            progress["percent"] = 100.0
+        elif isinstance(current_value, int) and isinstance(total_value, int) and total_value > 0:
             percent = max(0.0, min(100.0, round((current_value / total_value) * 100.0, 2)))
             progress["percent"] = percent
         elif "percent" in progress:

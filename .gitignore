@@ -38,6 +38,10 @@ config/secrets/
 /research/
 /node_modules/
 
+# Web frontend dependencies and build output (including nested projects)
+node_modules/
+dist/
+
 # OS/editor noise
 .DS_Store
 Thumbs.db

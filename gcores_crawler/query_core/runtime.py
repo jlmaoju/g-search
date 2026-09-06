@@ -5,7 +5,7 @@ import re
 from collections import Counter, defaultdict
 from typing import Any, List, Optional, Sequence
 
-from ..lexicon import dedupe_preserve_order, extract_hotwords_from_text, load_alias_map, replace_aliases
+from ..lexicon import QUOTED_PATTERNS, dedupe_preserve_order, extract_hotwords_from_text, load_alias_map, replace_aliases
 from .catalog import QueryCatalog
 from .config import (
     DEFAULT_COLLECTION,
@@ -22,6 +22,13 @@ from .store import ReadOnlySearchQdrantStore
 
 QUERY_SPLIT_RE = re.compile(r"[\s,，。！？?|]+")
 QUERY_CONNECTOR_SPLIT_RE = re.compile(r"[和与及跟]")
+MEMORY_PREFIX_RE = re.compile(
+    r"^(?:我记得|我记着|我印象中|印象中|印象里|好像|似乎|"
+    r"请帮我找一下|帮我找一下|帮我找找|帮我找|我想找|想找)[\s，,:：]*"
+)
+MEMORY_TOPIC_PREFIX_RE = re.compile(r"^(?:有一期节目|有一期|以前|之前|曾经|聊过|聊到|讲过|谈过|说过|提到过|讨论过|关于)[\s，,:：]*")
+MEMORY_SUFFIX_RE = re.compile(r"(?:的)?(?:那一期节目|那期节目|那一期|那期)[。！？?！\s]*$")
+QUERY_NOISE_TERMS = {"我记", "我记得", "记得", "聊过", "聊到", "那期", "那一期", "好像", "节目"}
 DOC_TYPE_PRIORS = {
     "item_title": 0.18,
     "episode_card": 0.16,
@@ -44,32 +51,44 @@ def resolve_alias_map(config: SearchIndexConfig) -> dict[str, str]:
 
 
 def extract_query_terms(query: str) -> List[str]:
-    candidates = [normalize_text(query)]
-    candidates.extend(part for part in QUERY_SPLIT_RE.split(query) if part)
-    candidates.extend(extract_hotwords_from_text(query))
     reduced = normalize_query_for_terms(query)
+    candidates = [reduced]
     candidates.extend(part for part in QUERY_SPLIT_RE.split(reduced) if part)
+    candidates.extend(extract_hotwords_from_text(reduced))
     candidates.extend(part for part in QUERY_CONNECTOR_SPLIT_RE.split(reduced) if part)
+    quoted_terms = {match.group(1) for pattern in QUOTED_PATTERNS for match in pattern.finditer(reduced)}
     results: List[str] = []
     for candidate in candidates:
         normalized = normalize_text(candidate)
-        if not normalized or len(normalized) == 1:
+        if not normalized or len(normalized) == 1 or (normalized in QUERY_NOISE_TERMS and normalized != reduced and normalized not in quoted_terms):
             continue
         results.append(normalized)
+    # Whole clues precede n-grams so the fallback's term budget cannot hide a
+    # participant name or a quoted title behind fragments of an earlier clue.
+    for normalized in dedupe_preserve_order(results):
         if " " not in normalized and all("\u4e00" <= char <= "\u9fff" for char in normalized) and 4 <= len(normalized) <= 12:
             for size in (2, 3, 4):
                 if len(normalized) < size:
                     continue
                 for index in range(0, len(normalized) - size + 1):
-                    results.append(normalized[index : index + size])
+                    term = normalized[index : index + size]
+                    if term not in QUERY_NOISE_TERMS:
+                        results.append(term)
     return dedupe_preserve_order(results)
 
 
 def normalize_query_for_terms(query: str) -> str:
-    normalized = normalize_text(query)
-    for marker in ("那期节目", "那期", "节目", "那个", "这个", "做例子来说", "做例子", "来说", "举例来说", "举例", "比如说", "比如", "用"):
-        normalized = normalized.replace(marker, " ")
-    return normalize_text(normalized)
+    original = normalize_text(query)
+    normalized = MEMORY_SUFFIX_RE.sub("", original)
+    has_memory_prefix = bool(MEMORY_PREFIX_RE.match(normalized))
+    while MEMORY_PREFIX_RE.match(normalized):
+        normalized = MEMORY_PREFIX_RE.sub("", normalized, count=1)
+    if has_memory_prefix:
+        while MEMORY_TOPIC_PREFIX_RE.match(normalized):
+            normalized = MEMORY_TOPIC_PREFIX_RE.sub("", normalized, count=1)
+    # Keep literal titles, quoted phrases, negation and meaningful characters
+    # (e.g. 应用/不能结婚的男人); never globally delete “用” or “节目”.
+    return normalize_text(normalized) or original
 
 
 def resolve_search_scope_doc_types(scope: str, requested_doc_types: Optional[Sequence[str]] = None) -> List[str]:
@@ -159,6 +178,14 @@ def semantic_degradation_message(error: str) -> str:
     if "timed out" in lowered or "timeout" in lowered:
         return "语义检索服务响应超时，当前显示的是关键词降级结果，相关性和排序质量会下降。"
     return "语义检索服务暂时不可用，当前显示的是关键词降级结果，相关性和排序质量会下降。"
+
+
+def semantic_degradation_reason(error: str) -> str:
+    error_text = str(error or "")
+    lowered = error_text.lower()
+    if "1113" in lowered or "余额不足" in error_text or "资源包" in error_text:
+        return "embedding_quota_exhausted"
+    return "semantic_recall_unavailable"
 
 
 def get_episode_details(
@@ -365,10 +392,14 @@ def run_search_query_with_runtime(
         "results": results,
     }
     if semantic_error:
+        degraded_reason = semantic_degradation_reason(semantic_error)
         payload["degraded"] = True
-        payload["degraded_reason"] = "semantic_recall_unavailable"
+        payload["degraded_reason"] = degraded_reason
         payload["degraded_message"] = semantic_degradation_message(semantic_error)
-        payload["degraded_detail"] = "本次没有使用向量语义召回，只使用本地关键词索引进行降级检索。"
+        if degraded_reason == "embedding_quota_exhausted":
+            payload["degraded_detail"] = "如果你看到这条提示，请到机核私信 YQBelmont贲 告知一声，感谢。"
+        else:
+            payload["degraded_detail"] = "本次没有使用向量语义召回，只使用本地关键词索引进行降级检索。"
         payload["semantic_error"] = semantic_error[:500]
     return payload
 

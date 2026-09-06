@@ -1,0 +1,29 @@
+{
+  "results": [
+    {
+      "doc_id": "fixture:scene:1",
+      "item_id": "fixture-episode",
+      "item_title": "检索测试节目",
+      "doc_type": "scene_summary",
+      "category": "测试类型",
+      "users": ["测试参与者"],
+      "published_at": "2026-01-01T00:00:00Z",
+      "display_timestamp": "01:02",
+      "start_ms": 62000,
+      "display_text": "命中片段\n这是人工编写的测试摘要。",
+      "excerpt": "这是测试上下文。",
+      "cover_url": "https://image.gcores.com/fixture-cover.png",
+      "source_url": "https://www.gcores.com/",
+      "neighbor_atoms": [{"display_timestamp": "01:00", "text": "这是人工编写的转录样例，不是真实节目内容。"}]
+    },
+    {
+      "doc_id": "fixture:title:1",
+      "item_id": "fixture-episode",
+      "item_title": "检索测试节目",
+      "doc_type": "item_title",
+      "desc": "这是标题模式的简介样例。",
+      "cover_url": "https://image.gcores.com/fixture-cover.png",
+      "source_url": "https://www.gcores.com/"
+    }
+  ]
+}

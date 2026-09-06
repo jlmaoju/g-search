@@ -17,7 +17,7 @@ def build_search_ui_meta_snapshot(
     *,
     root: str,
     collection_name: str,
-    participants_limit: int = 160,
+    participants_limit: Optional[int] = None,
 ) -> dict:
     catalog = QueryCatalog(root)
     manifest = catalog.load_manifest() or {}
@@ -54,7 +54,7 @@ def write_search_ui_meta_snapshot(
     root: str,
     collection_name: str,
     output_path: Optional[str | Path] = None,
-    participants_limit: int = 160,
+    participants_limit: Optional[int] = None,
 ) -> dict:
     snapshot = build_search_ui_meta_snapshot(
         root=root,

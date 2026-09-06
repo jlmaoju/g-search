@@ -9,6 +9,8 @@
 - 确认 `launchers/start_gsearch.ps1` 能从 `.env` 读取 `ZHIPU_API_KEY`。
 - 确认 `node --check gcores_crawler/frontend/assets/app.js` 通过。
 - 确认 `python -m py_compile` 对核心源码通过。
+- 确认 `frontend/` 内运行 `npm ci`、`npm test`、`npm run build` 通过。
+- 确认前端构建与已验收版本一致，样例仅含测试数据，开发代理默认连接本地后端。
 
 发布数据包前：
 
