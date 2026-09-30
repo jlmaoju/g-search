@@ -185,22 +185,22 @@ export const ParticleShapes = (() => {
       this.data=pairGeometries(geometries,this.count,this.options);this.modelCount=this.data.length;
       this.current=this.options.initialModel;this.from=this.current;this.to=(this.current+1)%this.modelCount;this.progress=0;this.active=false;this.scrubbing=false;
       this.auto=this.options.auto&&!this.reduced;this.slow=this.options.slow;this.hold=0;this.time=0;this.last=0;this.raf=0;this.pending=null;this.direction=1;
-      this.pointer={x:0,y:0};this.tilt={x:0,y:0};this.velocity={x:0,y:0};
+      this.cursor={x:0,y:0};this.pointer={x:0,y:0};this.tilt={x:0,y:0};this.velocity={x:0,y:0};this.pointerStrength=1;this.pointerParallax=0;
       this.initGL();this.resize();this.render();
       this.resizeObserver=new ResizeObserver(()=>{this.resize();this.render();this.wake();});this.resizeObserver.observe(host);
       const pointerHost=this.options.pointerTarget||host.closest('.brand')||host;
       pointerHost.addEventListener('pointermove',e=>{
-        if(this.reduced)return;
+        if(this.reduced||this.paused||e.pointerType==='touch')return;
         const r=host.getBoundingClientRect();
-        this.pointer.x=clamp((e.clientX-r.left)/r.width*2-1,-1,1)*this.options.mouseTiltX;
-        this.pointer.y=clamp((e.clientY-r.top)/r.height*2-1,-1,1)*this.options.mouseTiltY;
-        this.wake();
+        this.cursor.x=clamp((e.clientX-r.left)/r.width*2-1,-1,1);
+        this.cursor.y=clamp((e.clientY-r.top)/r.height*2-1,-1,1);
+        this.updatePointer();
       },{signal:this.signal,passive:true});
-      pointerHost.addEventListener('pointerleave',()=>{this.pointer.x=this.pointer.y=0;this.wake();},{signal:this.signal});
+      pointerHost.addEventListener('pointerleave',()=>{this.cursor.x=this.cursor.y=0;this.updatePointer();},{signal:this.signal});
       document.addEventListener('visibilitychange',()=>{this.last=0;if(document.hidden){cancelAnimationFrame(this.raf);this.raf=0;}else this.wake();},{signal:this.signal});
       this.motion.addEventListener('change',e=>{
         this.reduced=e.matches&&!this.override;
-        if(this.reduced){this.setAuto(false);this.pointer.x=this.pointer.y=this.tilt.x=this.tilt.y=this.velocity.x=this.velocity.y=0;}
+        if(this.reduced){this.setAuto(false);this.cursor.x=this.cursor.y=this.pointer.x=this.pointer.y=this.tilt.x=this.tilt.y=this.velocity.x=this.velocity.y=0;}
         this.emit('mode');this.wake();
       },{signal:this.signal});
       canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();cancelAnimationFrame(this.raf);this.raf=0;this.lost=true;this.emit('lost');},{signal:this.signal});
@@ -272,8 +272,17 @@ export const ParticleShapes = (() => {
     }
     setAuto(value){this.auto=Boolean(value)&&!this.reduced;if(this.auto){this.scrubbing=false;this.direction=1;}this.hold=0;this.emit('mode');this.wake();}
     setSlow(value){this.slow=Boolean(value);this.emit('mode');this.wake();}
+    updatePointer(){
+      this.pointer.x=this.cursor.x*this.options.mouseTiltX*this.pointerStrength;
+      this.pointer.y=this.cursor.y*this.options.mouseTiltY*this.pointerStrength;
+      this.wake();
+    }
+    setPointerResponse({strength=1,parallax=0}={}){
+      if(!Number.isFinite(strength)||strength<0||!Number.isFinite(parallax)||parallax<0)throw new TypeError('Pointer response must be finite and nonnegative');
+      this.pointerStrength=strength;this.pointerParallax=parallax;this.updatePointer();this.render();
+    }
     setPaused(value){this.paused=Boolean(value);this.last=0;if(this.paused){cancelAnimationFrame(this.raf);this.raf=0;this.render();}else this.wake();this.emit('mode');}
-    setMotionOverride(value){this.override=Boolean(value);this.reduced=this.motion.matches&&!this.override;if(this.reduced){this.auto=false;this.pointer.x=this.pointer.y=this.tilt.x=this.tilt.y=this.velocity.x=this.velocity.y=0;}this.render();this.emit('mode');this.wake();}
+    setMotionOverride(value){this.override=Boolean(value);this.reduced=this.motion.matches&&!this.override;if(this.reduced){this.auto=false;this.cursor.x=this.cursor.y=this.pointer.x=this.pointer.y=this.tilt.x=this.tilt.y=this.velocity.x=this.velocity.y=0;}this.render();this.emit('mode');this.wake();}
     wake(){if(!this.destroyed&&!this.paused&&!this.raf&&!this.lost&&!document.hidden)this.raf=requestAnimationFrame(t=>this.frame(t));}
     frame(now){
       this.raf=0;if(this.paused||this.destroyed||this.lost)return;
@@ -300,7 +309,7 @@ export const ParticleShapes = (() => {
       if(this.destroyed||this.lost)return;
       const gl=this.gl,u=this.locations;
       gl.clear(gl.COLOR_BUFFER_BIT);gl.useProgram(this.program);
-      gl.uniform2f(u.uResolution,this.width,this.height);gl.uniform2f(u.uCenter,...this.center);
+      gl.uniform2f(u.uResolution,this.width,this.height);gl.uniform2f(u.uCenter,this.center[0]+this.tilt.x*this.scale*this.pointerParallax,this.center[1]+this.tilt.y*this.scale*this.pointerParallax);
       gl.uniform1f(u.uScale,this.scale);gl.uniform1f(u.uPixelRatio,this.dpr);gl.uniform1f(u.uProgress,this.progress);
       gl.uniform1f(u.uTime,this.time);gl.uniform1f(u.uReduced,this.reduced?1:0);gl.uniform1f(u.uTravel,this.travel);
       gl.uniform3f(u.uColor,...this.options.color);gl.uniform1f(u.uPointSize,this.options.pointSize*Math.min(1,Math.max(.55,this.width/132)));gl.uniform1f(u.uLocalFraction,this.options.localFraction);

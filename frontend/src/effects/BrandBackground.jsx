@@ -18,9 +18,13 @@ function applyMotion(scene,animated){
   scene.setPaused(!animated);
 }
 
-export function BrandBackground({animated}){
-  const hostRef=useRef(null),sceneRef=useRef(null),animatedRef=useRef(animated);
-  animatedRef.current=animated;
+function applyPresentation(scene,welcome){
+  scene.setPointerResponse(welcome?{strength:3.4,parallax:.38}:{strength:1,parallax:0});
+}
+
+export function BrandBackground({animated,welcome}){
+  const hostRef=useRef(null),sceneRef=useRef(null),animatedRef=useRef(animated),welcomeRef=useRef(welcome);
+  animatedRef.current=animated;welcomeRef.current=welcome;
   const [state,setState]=useState('loading');
   useEffect(()=>{
     const host=hostRef.current,controller=new AbortController();
@@ -36,7 +40,7 @@ export function BrandBackground({animated}){
         if(controller.signal.aborted)return;
         const scene=await createBrandScene(host,{signal:controller.signal,getAnimated:()=>animatedRef.current});
         if(controller.signal.aborted){scene.destroy();return;}
-        sceneRef.current=scene;applyMotion(scene,animatedRef.current);setState('ready');
+        sceneRef.current=scene;applyMotion(scene,animatedRef.current);applyPresentation(scene,welcomeRef.current);setState('ready');
       }catch{
         // A decorative effect failing must never take down the search UI.
         if(!controller.signal.aborted)setState('unavailable');
@@ -50,5 +54,6 @@ export function BrandBackground({animated}){
     };
   },[]);
   useEffect(()=>{if(sceneRef.current)applyMotion(sceneRef.current,animated);},[animated]);
-  return <div ref={hostRef} className="brand-background" aria-hidden="true" data-state={state} data-motion={animated?'on':'off'}/>;
+  useEffect(()=>{if(sceneRef.current)applyPresentation(sceneRef.current,welcome);},[welcome]);
+  return <div ref={hostRef} className="brand-background" aria-hidden="true" data-state={state} data-motion={animated?'on':'off'} data-view={welcome?'welcome':'results'}/>;
 }

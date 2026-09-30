@@ -9,7 +9,7 @@ function environment({noWebGL=false,reduced=false}={}){
   const gl={VERTEX_SHADER:1,FRAGMENT_SHADER:2,COMPILE_STATUS:3,LINK_STATUS:4,ARRAY_BUFFER:5,STATIC_DRAW:6,DEPTH_TEST:7,BLEND:8,SRC_ALPHA:9,ONE_MINUS_SRC_ALPHA:10,ONE:11,FLOAT:12,POINTS:13,COLOR_BUFFER_BIT:14,
     createShader:()=>({}),shaderSource(){},compileShader(){},getShaderParameter:()=>true,deleteShader(){},
     createProgram(){const p={kind:'program'};allocated.add(p);return p;},attachShader(){},linkProgram(){},getProgramParameter:()=>true,useProgram(){},getUniformLocation:(_,n)=>n,getAttribLocation:(_,n)=>n,
-    createBuffer(){const b={kind:'buffer'};allocated.add(b);return b;},bindBuffer(_,buffer){boundBuffer=buffer;},bufferData(){},disable(){},enable(){},blendFuncSeparate(){},clearColor(){},viewport(){},clear(){},uniform2f(){},uniform3f(){},uniform1f:(k,v)=>{uniforms[k]=v;},enableVertexAttribArray(){},vertexAttribPointer(name){bindings[name]=boundBuffer;},drawArrays:(mode,first,count)=>draws.push({mode,first,count,role:uniforms.uRole,source:bindings.aPosition,target:bindings.aTargetPosition}),deleteBuffer:b=>deleted.add(b),deleteProgram:p=>deleted.add(p),
+    createBuffer(){const b={kind:'buffer'};allocated.add(b);return b;},bindBuffer(_,buffer){boundBuffer=buffer;},bufferData(){},disable(){},enable(){},blendFuncSeparate(){},clearColor(){},viewport(){},clear(){},uniform2f:(k,...values)=>{uniforms[k]=values;},uniform3f(){},uniform1f:(k,v)=>{uniforms[k]=v;},enableVertexAttribArray(){},vertexAttribPointer(name){bindings[name]=boundBuffer;},drawArrays:(mode,first,count)=>draws.push({mode,first,count,role:uniforms.uRole,source:bindings.aPosition,target:bindings.aTargetPosition}),deleteBuffer:b=>deleted.add(b),deleteProgram:p=>deleted.add(p),
   };
   class Host{constructor(){this.style={position:''};this.children=[];this.listeners=[];}getBoundingClientRect(){return{width:132,height:132,left:0,top:0};}appendChild(c){this.children.push(c);c.parent=this;}addEventListener(type,fn,options){this.listeners.push({type,fn,options});}dispatchEvent(){}closest(){return null;}}
   globalThis.HTMLElement=Host;globalThis.devicePixelRatio=1;globalThis.getComputedStyle=()=>({position:'static'});
@@ -112,4 +112,32 @@ test('initially paused backgrounds render and resize without scheduling animatio
   assert.equal(env.draws.length,1);assert.equal(env.frames.size,0);
   env.draws.length=0;scene.resizeObserver.callback();
   assert.equal(env.draws.length,1);assert.equal(env.frames.size,0);scene.destroy();
+});
+
+test('welcome pointer response changes live without restarting particles or their morph',()=>{
+  const env=environment(),scene=ParticleShapes.mount(env.host,{models:brandModels,count:80,mobileCount:80,auto:false,mouseTiltX:.11,mouseTiltY:.08});
+  const move=env.host.listeners.find(listener=>listener.type==='pointermove').fn;
+  move({clientX:132,clientY:0,pointerType:'mouse'});
+  assert.equal(scene.pointer.x,.11);assert.equal(scene.pointer.y,-.08);
+  scene.transitionTo(2);
+  const data=scene.data,buffers=scene.buffers,from=scene.from,to=scene.to;
+  scene.setPointerResponse({strength:3.4,parallax:.38});
+  assert.ok(Math.abs(scene.pointer.x-.374)<1e-9);assert.ok(Math.abs(scene.pointer.y+.272)<1e-9);
+  assert.equal(scene.data,data);assert.equal(scene.buffers,buffers);assert.equal(scene.from,from);assert.equal(scene.to,to);assert.equal(scene.active,true);
+  for(let i=0;i<40;i++)scene.frame(1000+i*17);
+  assert.ok(env.uniforms.uCenter[0]>scene.center[0]);assert.ok(env.uniforms.uCenter[1]<scene.center[1]);
+  scene.setPointerResponse({strength:1,parallax:0});scene.render();
+  assert.equal(scene.pointer.x,.11);assert.equal(scene.pointer.y,-.08);assert.deepEqual(env.uniforms.uCenter,scene.center);
+  env.host.listeners.find(listener=>listener.type==='pointerleave').fn();
+  assert.deepEqual(scene.pointer,{x:0,y:0});scene.destroy();
+});
+
+test('strong pointer response ignores touch, pause and reduced-motion input',()=>{
+  for(const options of [{touch:true},{paused:true},{reduced:true}]){
+    const env=environment({reduced:!!options.reduced}),scene=ParticleShapes.mount(env.host,{count:80,mobileCount:80,auto:false,paused:!!options.paused});
+    scene.setPointerResponse({strength:3.4,parallax:.38});
+    const move=env.host.listeners.find(listener=>listener.type==='pointermove').fn;
+    move({clientX:132,clientY:0,pointerType:options.touch?'touch':'mouse'});
+    assert.deepEqual(scene.pointer,{x:0,y:0});scene.destroy();
+  }
 });

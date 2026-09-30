@@ -1,7 +1,7 @@
 .site-surface{position:relative;isolation:isolate;min-height:100svh;background:#faf9f7}
 .site-surface .app-shell{position:relative}
-.brand-background{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;contain:strict;opacity:0;transition:none}
+.brand-background{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;contain:strict;opacity:0;transition:opacity .65s ease}
 .brand-background[data-state="ready"]{opacity:.24}
+.brand-background[data-state="ready"][data-view="welcome"]{opacity:.52}
 .site-surface .search-form input{background:rgba(250,249,247,.88)}
-.site-surface .results-list{background:rgba(250,249,247,.7)}
-.site-surface .result-row{background:rgba(250,249,247,.88)}
+.site-surface .results-list,.site-surface .result-row{background:transparent}

@@ -91,7 +91,7 @@ export function App() {
   function retrySearch(){setRequest({...request});}
   const status=live.pending?'正在寻找这段记忆…':live.error?'检索暂未完成':live.notice?`关键词匹配：当前显示 ${results.length} 条`:`当前显示 ${results.length} 条${sort==='relevance'?'（按相关度）':''}`;
 
-  return <div className="site-surface"><BrandBackground animated={backgroundMotion}/><div className={`app-shell text-${fontSize} ${hasSearch?'has-search':'is-welcome'}`}>
+  return <div className="site-surface"><BrandBackground animated={backgroundMotion} welcome={!hasSearch}/><div className={`app-shell text-${fontSize} ${hasSearch?'has-search':'is-welcome'}`}>
     <a className="skip-link" href={hasSearch?'#results':'#search'}>{hasSearch?'跳到搜索结果':'跳到搜索'}</a>
     <header className="masthead"><div className="brand-line"><button className="brand" onClick={resetSearch} aria-label="Gsearch，回到首页"><img src="/assets/gsearch-logo.png" alt="gsearch"/></button><p className="tagline">想起一句，找到那期。</p></div><div className="utilities"><nav aria-label="页面选项"><button onClick={()=>setModal('about')}>关于</button><span aria-hidden="true">|</span><button onClick={()=>setModal('settings')}>设置</button></nav><p>{updated?`数据库更新于 ${updated}`:catalog.pending?'正在读取数据库信息…':'数据库信息暂不可用'}</p></div></header>
     <main>
