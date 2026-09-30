@@ -2,6 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import {RiArrowRightUpLine,RiArrowDownSLine,RiEqualizerLine,RiCloseLine,RiArrowRightLine} from '@remixicon/react';
 import '@fontsource-variable/oswald';
 import {MAX_RESULTS,MODES,sortResults} from './api.js';
+import {BrandBackground,useBackgroundMotion} from './effects/BrandBackground.jsx';
 import {useCatalog,useLiveSearch} from './useLiveData.js';
 
 const INITIAL_REQUEST={query:'',mode:'content',categories:[],people:[],limit:50};
@@ -55,6 +56,7 @@ function FilterOptions({options,selected,onToggle,kind}) {
 }
 
 export function App() {
+  const [backgroundMotion,setBackgroundMotion]=useBackgroundMotion();
   const [request,setRequest]=useState(INITIAL_REQUEST);
   const [input,setInput]=useState(''),[sort,setSort]=useState('relevance');
   const [expansion,setExpansion]=useState({request:null,values:{}});
@@ -89,7 +91,7 @@ export function App() {
   function retrySearch(){setRequest({...request});}
   const status=live.pending?'正在寻找这段记忆…':live.error?'检索暂未完成':live.notice?`关键词匹配：当前显示 ${results.length} 条`:`当前显示 ${results.length} 条${sort==='relevance'?'（按相关度）':''}`;
 
-  return <div className={`app-shell text-${fontSize} ${hasSearch?'has-search':'is-welcome'}`}>
+  return <div className="site-surface"><BrandBackground animated={backgroundMotion}/><div className={`app-shell text-${fontSize} ${hasSearch?'has-search':'is-welcome'}`}>
     <a className="skip-link" href={hasSearch?'#results':'#search'}>{hasSearch?'跳到搜索结果':'跳到搜索'}</a>
     <header className="masthead"><div className="brand-line"><button className="brand" onClick={resetSearch} aria-label="Gsearch，回到首页"><img src="/assets/gsearch-logo.png" alt="gsearch"/></button><p className="tagline">想起一句，找到那期。</p></div><div className="utilities"><nav aria-label="页面选项"><button onClick={()=>setModal('about')}>关于</button><span aria-hidden="true">|</span><button onClick={()=>setModal('settings')}>设置</button></nav><p>{updated?`数据库更新于 ${updated}`:catalog.pending?'正在读取数据库信息…':'数据库信息暂不可用'}</p></div></header>
     <main>
@@ -122,8 +124,8 @@ export function App() {
         <div className="filter-selection" aria-live="polite">已选 {draft.categories.length} 种类型、{draft.people.length} 位参与者</div>
         <div className="dialog-actions"><button className="underlined-link" onClick={()=>setDraft({categories:[],people:[]})}>清空筛选</button><button className="cut-button" disabled={catalog.pending||!!catalog.error} onClick={()=>{changeFilters(draft);closeModal();}}>应用筛选</button></div>
       </div>}
-      {modal==='settings'&&<div className="dialog-body settings-content"><label>每次检索条数<select value={limit} onChange={e=>{const value=Number(e.target.value);setLimit(value);setRequest({...request,limit:value});}}>{[20,50,100,200].map(value=><option key={value} value={value}>{value} 条结果</option>)}</select></label><label>正文字号<select value={fontSize} onChange={e=>setFontSize(e.target.value)}><option value="normal">标准</option><option value="large">较大</option></select></label><label className="check-setting"><input type="checkbox" checked={autoExpand} onChange={e=>setAutoExpand(e.target.checked)}/>搜索后自动展开第一条结果</label><p className="setting-note">时间排序作用于当前返回的结果。设置在本次打开期间保留。</p><button className="cut-button" onClick={closeModal}>完成</button></div>}
+      {modal==='settings'&&<div className="dialog-body settings-content"><label>每次检索条数<select value={limit} onChange={e=>{const value=Number(e.target.value);setLimit(value);setRequest({...request,limit:value});}}>{[20,50,100,200].map(value=><option key={value} value={value}>{value} 条结果</option>)}</select></label><label>正文字号<select value={fontSize} onChange={e=>setFontSize(e.target.value)}><option value="normal">标准</option><option value="large">较大</option></select></label><label className="check-setting"><input type="checkbox" checked={autoExpand} onChange={e=>setAutoExpand(e.target.checked)}/>搜索后自动展开第一条结果</label><label className="check-setting"><input type="checkbox" checked={backgroundMotion} onChange={e=>setBackgroundMotion(e.target.checked)}/>背景动效</label><p className="setting-note">背景动效默认遵循系统的减少动态偏好。时间排序作用于当前返回的结果。设置在本次打开期间保留。</p><button className="cut-button" onClick={closeModal}>完成</button></div>}
       {modal==='about'&&<div className="dialog-body about-content"><p className="about-lead">想起一句，找到那期。</p><p>一个帮助你找回机核节目与片段的检索工具。本项目仅覆盖免费节目，会不定期更新，来自一个野生怀旧老机组。</p><p>「内容」搜索节目片段与整期摘要；「标题」搜索节目名；「时间轴」搜索节目注释和知识点。</p>{catalog.meta&&<p>当前提供 {catalog.categories.length} 种节目类型、{catalog.people.length} 位参与者。数据库更新于 {updated}。</p>}<p><a className="underlined-link github-link" href={REPOSITORY_URL} target="_blank" rel="noopener noreferrer">GitHub 仓库<RiArrowRightUpLine size={18} aria-hidden="true"/></a></p><p>封面与节目信息来自机核，摘要与逐字稿来自现有检索数据；逐字稿可能存在识别误差。</p><div className="about-example"><span>可以试试</span>{['日剧','雪崩','人间拾录'].map(word=><button key={word} onClick={()=>{closeModal();performSearch('content',word);}}>{word}<RiArrowRightUpLine size={16}/></button>)}</div><p className="setting-note">非官方项目，与机核无隶属关系。</p></div>}
     </dialog>
-  </div>;
+  </div></div>;
 }
